@@ -567,6 +567,86 @@ cleanup:
     return status;
 }
 
+int storage_select_result_by_row_indices(const char *table, ParsedSQL *sql,
+                                         const int *row_indices, int count,
+                                         RowSet **out)
+{
+    char schema_path[STORAGE_PATH_MAX];
+    char table_path[STORAGE_PATH_MAX];
+    ColDef *schema = NULL;
+    int schema_count = 0;
+    StorageRowBuffer rows = {0};
+    StorageRowBuffer selection = {0};
+    int index;
+    int status = -1;
+
+    if (out == NULL) {
+        fprintf(stderr, "storage_select_result_by_row_indices() received NULL out.\n");
+        return -1;
+    }
+    *out = NULL;
+
+    if (table == NULL || table[0] == '\0' || sql == NULL || count < 0 ||
+        (count > 0 && row_indices == NULL)) {
+        fprintf(stderr, "storage_select_result_by_row_indices() received invalid arguments.\n");
+        return -1;
+    }
+
+    if (build_schema_path(table, schema_path, sizeof(schema_path)) != 0 ||
+        build_table_path(table, table_path, sizeof(table_path)) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot build path for table '%s'\n", table);
+        return -1;
+    }
+
+    if (load_schema(schema_path, &schema, &schema_count) != 0) {
+        fprintf(stderr, "[storage] SELECT: table '%s' not found (schema missing)\n", table);
+        return -1;
+    }
+
+    if (load_table_rows(table_path, schema_count, &rows) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot read indexed rows for table '%s'\n", table);
+        goto cleanup;
+    }
+
+    selection.rows = NULL;
+    selection.count = 0;
+    selection.capacity = 0;
+    selection.row_width = rows.row_width;
+
+    for (index = 0; index < count; ++index) {
+        int row_index = row_indices[index];
+
+        if (row_index < 0 || row_index >= rows.count) {
+            continue;
+        }
+
+        if (append_row_buffer(&selection, rows.rows[row_index]) != 0) {
+            goto cleanup;
+        }
+    }
+
+    if (sort_selection(sql, schema, schema_count, &selection) != 0) {
+        goto cleanup;
+    }
+
+    if (sql->col_count == 1 && sql->columns != NULL) {
+        char fn[16];
+        char arg[64];
+        if (parse_aggregate_call(sql->columns[0], fn, sizeof(fn), arg, sizeof(arg)) == 0) {
+            status = build_rowset_for_aggregate(sql, schema, schema_count, &selection, out);
+            goto cleanup;
+        }
+    }
+
+    status = build_rowset_from_selection(sql, schema, schema_count, &selection, out);
+
+cleanup:
+    free_row_buffer(&selection, 0);
+    free_row_buffer(&rows, 1);
+    free(schema);
+    return status;
+}
+
 /* storage_select: 1주차 호환 wrapper.
  * storage_select_result 호출 → print_rowset 출력 → rowset_free.
  * 외부 동작은 1주차와 완전히 동일.
