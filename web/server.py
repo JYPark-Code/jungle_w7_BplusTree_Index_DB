@@ -151,6 +151,9 @@ def inject_payments(count: int = 100000) -> dict:
             "CREATE TABLE payments (id INT, user_id INT, amount INT, status VARCHAR, created_at INT);",
         ]
         base_ts = 1700000000
+        # SQL 라인 생성과 같은 루프에서 BIN 바이트도 축적해 둔다. 같은 random
+        # 시퀀스를 두 번 돌리지 않도록 한 루프에서 처리.
+        bin_buf = bytearray()
         for i in range(1, count + 1):
             uid = random.randint(1000, 9999)
             amt = random.randint(100, 500000)
@@ -161,9 +164,25 @@ def inject_payments(count: int = 100000) -> dict:
                 f"INSERT INTO payments (id, user_id, amount, status, created_at) "
                 f"VALUES ({i}, {uid}, {amt}, '{status}', {ts});"
             )
+            bin_buf += struct.pack(
+                _BIN_PAYMENTS_FMT,
+                i, uid, amt,
+                status.encode("ascii").ljust(_BIN_VARCHAR_LEN, b"\0"),
+                ts,
+            )
         sql = "\n".join(lines)
         result = run_sql(sql, timeout=180, bulk=True)
         error = result.get("error")
+        # SQL INSERT 성공 시 BIN 을 함께 기록 — SELECT 경로가 O(K) fseek 을 탐.
+        # CSV 는 sqlparser 가 썼고, BIN 은 동일 데이터를 여기서 append 모드로 저장.
+        if error is None:
+            try:
+                bin_path = ROOT / "data" / "tables" / "payments.bin"
+                bin_path.parent.mkdir(parents=True, exist_ok=True)
+                with bin_path.open("wb") as bf:
+                    bf.write(bytes(bin_buf))
+            except OSError as e:
+                error = f"BIN 저장 실패 (SQL 은 성공): {e}"
     else:
         error = _write_payments_csv_direct(count)
 
