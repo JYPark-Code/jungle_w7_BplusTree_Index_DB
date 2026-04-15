@@ -220,8 +220,33 @@ Speedup : ~128x
 - 브라우저 동작은 수동 시나리오 체크리스트로 대체 OK
 
 **완료 기준 (MP5, 선택):**
-- `python3 web/server.py` 로컬 실행 → 브라우저에서 INSERT / SELECT / 벤치 차트 3 시나리오 동작
+- `python3 web/server.py` 로컬 실행 → 브라우저에서 아래 "결제/트랜잭션 로그 시연" 3 시나리오 동작
 - 기존 `make test` / `make bench` 회귀 0
+
+**시연 시나리오 — 결제/트랜잭션 로그 (발표 메인 컨텐츠):**
+
+> 발표용 핵심 멘트: **"장애 발생 시 특정 시간 구간의 트랜잭션 로그를 빠르게 조회해야 한다 — B+Tree range query 가 O(log n + k) 로 해결한다."**
+
+데이터 모델:
+```sql
+CREATE TABLE payments (
+    id INT, user_id INT, amount INT,
+    status TEXT,       -- 'SUCCESS' | 'FAIL' | 'TIMEOUT'
+    created_at INT     -- Unix timestamp
+);
+```
+
+UI 버튼 3개 (최소 구성):
+1. **[ 더미 주입 ]** — 10만~100만 건, 실패율 5% / 타임아웃 2% 섞어서 생성
+2. **[ 장애 구간 조회 (range) ]** — `WHERE id BETWEEN A AND B` 로 특정 시간 구간 로그만 추출, 1ms 내 반환 표시
+3. **[ 선형 vs 인덱스 비교 ]** — 같은 범위를 선형 탐색으로도 돌려서 Chart.js 막대그래프 2개, "400배 단축" 시각화
+
+발표자가 말할 스토리: *"새벽 3시 결제 시스템 장애. 로그에서 3:00~3:15 구간만 빠르게 뽑아야 한다. id 는 시간순 auto-increment 이므로 id 범위 = 시간 구간 proxy 로 사용."*
+
+**JSON 스키마 계약 (FE 깨짐 방지):**
+- 착수 시점의 `./sqlparser --json` 출력 스펙을 `web/README.md` 에 박제
+- 정환/민철 PR 머지 후 스키마 diff 발생 시 FE 파서만 수정
+- 스키마 변경은 정환(executor/json_out 담당) 과 규태(FE 담당) 합의 후에만
 
 ---
 
@@ -293,6 +318,7 @@ scope 예시: `bptree`, `executor`, `storage`, `bench`, `makefile`
 | `src/storage.c` | 민철 | ❌ |
 | `bench/benchmark.c` | 규태 | ❌ |
 | `web/` (전체) | 규태 (보너스) | ❌ |
+| `src/json_out.c` | 정환 (출력 스키마 변경 시 규태에 공유) | 🟡 |
 | `include/types.h` | 전원 수정 금지 | ❌ |
 | `Makefile` | 지용 (각자 필요시 PR로 요청) | PR 경유 |
 
