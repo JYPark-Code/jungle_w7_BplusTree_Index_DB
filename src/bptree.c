@@ -13,8 +13,8 @@
  *
  * Phase 2: 구조체 + create/destroy + search.
  * Phase 3: insert (split 없음).
- * Phase 4: leaf split + root grow (이번 커밋).
- * Phase 5: internal/root split.
+ * Phase 4: leaf split + root grow.
+ * Phase 5: internal split + root split (이번 커밋). 트리 성장 완성.
  */
 
 #include "bptree.h"
@@ -190,6 +190,32 @@ static void internal_insert_nonfull(Node *n, int key, Node *right_child) {
     ++n->num_keys;
 }
 
+/* 내부 노드를 왼/오른으로 분할.
+ * 리프와 달리 중간 키는 양쪽 어디에도 남지 않고 완전히 위로 승격된다.
+ * 왼쪽(원본): keys[0..mid-1], children[0..mid]
+ * 승격:      keys[mid]
+ * 오른쪽:    keys[mid+1..order-1], children[mid+1..order]
+ *
+ * 호출 전제: n->num_keys == order (overflow 상태). */
+static Node *split_internal(Node *n, int order, int *promoted_key) {
+    assert(!n->is_leaf);
+    assert(n->num_keys == order);
+    Node *right = internal_new(order);
+    if (!right) return NULL;
+    int mid = order / 2;
+    *promoted_key = n->keys[mid];
+    int right_keys = order - mid - 1;
+    for (int i = 0; i < right_keys; ++i) {
+        right->keys[i] = n->keys[mid + 1 + i];
+    }
+    for (int i = 0; i <= right_keys; ++i) {
+        right->u.internal.children[i] = n->u.internal.children[mid + 1 + i];
+    }
+    right->num_keys = right_keys;
+    n->num_keys = mid;
+    return right;
+}
+
 /* 재귀 삽입. split 이 발생하면 split_out / key_out 으로 상위에 전달.
  *
  * 반환: 0 = split 없음, 1 = split 발생 (상위에서 key_out, split_out 처리 필요). */
@@ -211,14 +237,15 @@ static int insert_rec(Node *n, int order, int id, int row_index,
                            &child_split, &child_key);
     if (!split) return 0;
 
-    if (n->num_keys < order - 1) {
-        internal_insert_nonfull(n, child_key, child_split);
-        return 0;
-    }
+    /* 자식에서 split 이 올라왔다. 일단 이 내부 노드에 (child_key, child_split)
+     * 를 정렬 위치에 삽입 (배열 여유로 overflow 허용). 그 다음 자체 split 판단. */
+    internal_insert_nonfull(n, child_key, child_split);
+    if (n->num_keys < order) return 0;
 
-    /* 내부 노드 full — Phase 5 에서 internal split 로 처리 예정. */
-    assert(0 && "internal node split not yet supported (Phase 5)");
-    return 0;
+    Node *right = split_internal(n, order, key_out);
+    if (!right) return 0;
+    *split_out = right;
+    return 1;
 }
 
 void bptree_insert(BPTree *tree, int id, int row_index) {

@@ -227,6 +227,84 @@ static void test_leaf_split_duplicate_after_split(void) {
     bptree_destroy(t);
 }
 
+/* ---------- Phase 5: internal split + 다단 트리 ---------- */
+
+static void test_internal_split_small_order(void) {
+    printf("[TEST] order=4 로 50건 삽입 (내부 split 여러 번, 트리 3+ 레벨)\n");
+    BPTree *t = bptree_create(4);
+    int n = 50;
+    for (int i = 1; i <= n; ++i) bptree_insert(t, i, i * 3);
+    int ok = 1;
+    for (int i = 1; i <= n; ++i) {
+        if (bptree_search(t, i) != i * 3) ok = 0;
+    }
+    CHECK(ok, "1..50 전수 조회 성공 (내부 split 다수 유발)");
+    bptree_destroy(t);
+}
+
+static void test_internal_split_descending_large(void) {
+    printf("[TEST] order=4 내림차순 80건 삽입\n");
+    BPTree *t = bptree_create(4);
+    int n = 80;
+    for (int i = n; i >= 1; --i) bptree_insert(t, i, -i);
+    int ok = 1;
+    for (int i = 1; i <= n; ++i) {
+        if (bptree_search(t, i) != -i) ok = 0;
+    }
+    CHECK(ok, "내림차순 80건 전수 조회 성공");
+    bptree_destroy(t);
+}
+
+static void test_internal_split_shuffled(void) {
+    printf("[TEST] order=4 뒤섞인 100건 (순열) 삽입\n");
+    BPTree *t = bptree_create(4);
+    int n = 100;
+    int keys[100];
+    /* 간단한 순열: i*37 mod 100 은 gcd(37,100)=1 이라 bijection. */
+    for (int i = 0; i < n; ++i) keys[i] = (i * 37) % n;
+    for (int i = 0; i < n; ++i) bptree_insert(t, keys[i], keys[i] + 1000);
+    int ok = 1;
+    for (int i = 0; i < n; ++i) {
+        if (bptree_search(t, i) != i + 1000) ok = 0;
+    }
+    CHECK(ok, "순열 100건 전수 조회 성공");
+    bptree_destroy(t);
+}
+
+static void test_internal_split_large_scale(void) {
+    printf("[TEST] order=8, 1000 건 삽입 후 전수 검증\n");
+    BPTree *t = bptree_create(8);
+    int n = 1000;
+    for (int i = 0; i < n; ++i) bptree_insert(t, i * 2, i); /* 짝수만 */
+    int ok = 1;
+    for (int i = 0; i < n; ++i) {
+        if (bptree_search(t, i * 2) != i) ok = 0;
+    }
+    CHECK(ok, "짝수 1000건 전수 조회");
+    /* 홀수는 없어야 함 */
+    int not_found_ok = 1;
+    for (int i = 0; i < 20; ++i) {
+        if (bptree_search(t, i * 2 + 1) != -1) not_found_ok = 0;
+    }
+    CHECK(not_found_ok, "삽입 안 한 홀수 키 20개는 -1");
+    bptree_destroy(t);
+}
+
+static void test_internal_split_various_orders(void) {
+    printf("[TEST] order 3,5,16 에서도 200건 삽입이 정상 동작\n");
+    int orders[] = {3, 5, 16};
+    int all_ok = 1;
+    for (int oi = 0; oi < 3; ++oi) {
+        BPTree *t = bptree_create(orders[oi]);
+        for (int i = 0; i < 200; ++i) bptree_insert(t, i, i);
+        for (int i = 0; i < 200; ++i) {
+            if (bptree_search(t, i) != i) { all_ok = 0; break; }
+        }
+        bptree_destroy(t);
+    }
+    CHECK(all_ok, "order 3/5/16 모두 200건 전수 조회 통과");
+}
+
 static void test_insert_null_tree(void) {
     printf("[TEST] NULL 트리 삽입은 no-op\n");
     bptree_insert(NULL, 1, 1);
@@ -234,7 +312,7 @@ static void test_insert_null_tree(void) {
 }
 
 int main(void) {
-    printf("=== test_bptree (Phase 4) ===\n");
+    printf("=== test_bptree (Phase 5) ===\n");
     test_create_with_valid_order();
     test_create_rejects_tiny_order();
     test_create_accepts_large_order();
@@ -255,6 +333,11 @@ int main(void) {
     test_leaf_split_mixed_larger();
     test_leaf_split_root_grows();
     test_leaf_split_duplicate_after_split();
+    test_internal_split_small_order();
+    test_internal_split_descending_large();
+    test_internal_split_shuffled();
+    test_internal_split_large_scale();
+    test_internal_split_various_orders();
 
     printf("\n[BPTREE TESTS] %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;
