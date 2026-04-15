@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="ui-sans-serif, system-ui, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <linearGradient id="client" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#dbeafe"/><stop offset="1" stop-color="#bfdbfe"/>
+    </linearGradient>
+    <linearGradient id="parser" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fef3c7"/><stop offset="1" stop-color="#fde68a"/>
+    </linearGradient>
+    <linearGradient id="exec" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#dcfce7"/><stop offset="1" stop-color="#bbf7d0"/>
+    </linearGradient>
+    <linearGradient id="storage" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#ede9fe"/><stop offset="1" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <linearGradient id="tree" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fce7f3"/><stop offset="1" stop-color="#fbcfe8"/>
+    </linearGradient>
+    <linearGradient id="data" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <style>
+      .title { font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .box-title { font-size: 15px; font-weight: 700; fill: #0f172a; }
+      .box-sub { font-size: 11px; fill: #334155; }
+      .pill { font-size: 10px; font-weight: 600; fill: #0f172a; }
+      .badge { font-size: 10px; font-weight: 700; fill: #fff; }
+      .edge { stroke: #334155; stroke-width: 1.6; fill: none; }
+      .edge-label { font-size: 10px; fill: #475569; }
+    </style>
+  </defs>
+
+  <text x="500" y="34" text-anchor="middle" class="title">MiniSQL — B+ Tree Index 아키텍처</text>
+  <text x="500" y="54" text-anchor="middle" class="box-sub">CLI / Web → Parser → Executor → Storage (CSV | BIN) + BPTree</text>
+
+  <!-- Client layer -->
+  <g>
+    <rect x="60" y="90" width="880" height="70" rx="10" fill="url(#client)" stroke="#60a5fa" stroke-width="1.5"/>
+    <text x="100" y="115" class="box-title">Client Layer</text>
+    <g transform="translate(280,95)">
+      <rect width="180" height="55" rx="8" fill="#fff" stroke="#93c5fd"/>
+      <text x="90" y="22" text-anchor="middle" class="box-title">CLI</text>
+      <text x="90" y="40" text-anchor="middle" class="box-sub">$ ./sqlparser file.sql</text>
+    </g>
+    <g transform="translate(520,95)">
+      <rect width="230" height="55" rx="8" fill="#fff" stroke="#93c5fd"/>
+      <text x="115" y="22" text-anchor="middle" class="box-title">Web UI</text>
+      <text x="115" y="40" text-anchor="middle" class="box-sub">HTML + Chart.js + fetch()</text>
+    </g>
+  </g>
+
+  <!-- bridge: web server -->
+  <g transform="translate(520,185)">
+    <rect width="230" height="55" rx="8" fill="url(#storage)" stroke="#a78bfa"/>
+    <text x="115" y="22" text-anchor="middle" class="box-title">web/server.py</text>
+    <text x="115" y="40" text-anchor="middle" class="box-sub">stdlib http.server → subprocess</text>
+  </g>
+
+  <!-- Parser -->
+  <g transform="translate(60,270)">
+    <rect width="260" height="100" rx="10" fill="url(#parser)" stroke="#f59e0b"/>
+    <text x="20" y="26" class="box-title">parser.c</text>
+    <text x="20" y="48" class="box-sub">• 토큰화 + AST (ParsedSQL)</text>
+    <text x="20" y="64" class="box-sub">• BETWEEN A AND B → op="BETWEEN"</text>
+    <text x="20" y="80" class="box-sub">• WhereClause.value_to 채우기</text>
+  </g>
+
+  <!-- Executor -->
+  <g transform="translate(370,270)">
+    <rect width="260" height="100" rx="10" fill="url(#exec)" stroke="#16a34a"/>
+    <text x="20" y="26" class="box-title">executor.c</text>
+    <text x="20" y="48" class="box-sub">• QUERY_SELECT 진입 시</text>
+    <text x="20" y="64" class="box-sub">  storage_ensure_index() lazy</text>
+    <text x="20" y="80" class="box-sub">• try_range → try_indexed → linear</text>
+  </g>
+
+  <!-- BPTree -->
+  <g transform="translate(680,270)">
+    <rect width="260" height="100" rx="10" fill="url(#tree)" stroke="#ec4899"/>
+    <text x="20" y="26" class="box-title">bptree.c + index_registry</text>
+    <text x="20" y="48" class="box-sub">• leaf / internal / root split</text>
+    <text x="20" y="64" class="box-sub">• search / range (리프 링크)</text>
+    <text x="20" y="80" class="box-sub">• 테이블별 트리 레지스트리</text>
+  </g>
+
+  <!-- Storage -->
+  <g transform="translate(60,400)">
+    <rect width="880" height="120" rx="12" fill="url(#storage)" stroke="#8b5cf6"/>
+    <text x="20" y="28" class="box-title">storage.c — 가속 5종 + 2-path 읽기</text>
+
+    <!-- caches row -->
+    <g transform="translate(20,42)">
+      <rect width="164" height="22" rx="11" fill="#fff" stroke="#c4b5fd"/>
+      <text x="82" y="15" text-anchor="middle" class="pill">append FILE* 캐시</text>
+    </g>
+    <g transform="translate(194,42)">
+      <rect width="130" height="22" rx="11" fill="#fff" stroke="#c4b5fd"/>
+      <text x="65" y="15" text-anchor="middle" class="pill">schema 캐시</text>
+    </g>
+    <g transform="translate(334,42)">
+      <rect width="180" height="22" rx="11" fill="#fff" stroke="#c4b5fd"/>
+      <text x="90" y="15" text-anchor="middle" class="pill">path resolution 캐시</text>
+    </g>
+    <g transform="translate(524,42)">
+      <rect width="150" height="22" rx="11" fill="#fff" stroke="#c4b5fd"/>
+      <text x="75" y="15" text-anchor="middle" class="pill">meta (next_id/row)</text>
+    </g>
+    <g transform="translate(684,42)">
+      <rect width="160" height="22" rx="11" fill="#fff" stroke="#c4b5fd"/>
+      <text x="80" y="15" text-anchor="middle" class="pill">BULK_INSERT_MODE</text>
+    </g>
+
+    <!-- 2 paths -->
+    <g transform="translate(40,80)">
+      <rect width="390" height="30" rx="6" fill="#fff" stroke="#a78bfa"/>
+      <text x="195" y="20" text-anchor="middle" class="box-title" font-size="13">CSV path (가변 길이, 호환)</text>
+    </g>
+    <g transform="translate(470,80)">
+      <rect width="390" height="30" rx="6" fill="#1e293b" stroke="#a78bfa"/>
+      <text x="195" y="20" text-anchor="middle" class="badge" font-size="13">고정폭 BIN path — fseek O(K)</text>
+    </g>
+  </g>
+
+  <!-- Data files -->
+  <g>
+    <rect x="60" y="550" width="880" height="52" rx="8" fill="url(#data)" stroke="#64748b"/>
+    <text x="80" y="580" class="box-title" font-size="14">data/schema/&lt;t&gt;.schema</text>
+    <text x="360" y="580" class="box-title" font-size="14">data/tables/&lt;t&gt;.csv</text>
+    <text x="640" y="580" class="box-title" font-size="14">data/tables/&lt;t&gt;.bin  (선택)</text>
+  </g>
+
+  <!-- Edges -->
+  <line x1="370" y1="160" x2="370" y2="268" class="edge" marker-end="url(#arr)"/>
+  <line x1="635" y1="240" x2="500" y2="268" class="edge" marker-end="url(#arr)"/>
+  <line x1="320" y1="320" x2="368" y2="320" class="edge" marker-end="url(#arr)"/>
+  <line x1="630" y1="320" x2="678" y2="320" class="edge" marker-end="url(#arr)"/>
+  <line x1="500" y1="370" x2="500" y2="398" class="edge" marker-end="url(#arr)"/>
+  <line x1="810" y1="370" x2="810" y2="398" class="edge" marker-end="url(#arr)"/>
+  <line x1="255" y1="520" x2="255" y2="548" class="edge" marker-end="url(#arr)"/>
+  <line x1="525" y1="520" x2="525" y2="548" class="edge" marker-end="url(#arr)"/>
+  <line x1="735" y1="520" x2="735" y2="548" class="edge" marker-end="url(#arr)"/>
+</svg>
