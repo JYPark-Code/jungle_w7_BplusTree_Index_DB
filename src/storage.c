@@ -279,7 +279,10 @@ void storage_ensure_index(const char *table)
         return;
     }
 
-    /* pending append 있으면 flush 후 CSV 처음부터 스캔 */
+    /* pending append 있으면 flush 후 CSV 한 번만 처음부터 스캔.
+     * 이 한 번의 스캔에서 bptree_insert 와 meta cache 갱신(max_id/row_count)을
+     * 동시에 수행한다. 이전에는 scan_csv_meta 가 같은 파일을 또 한 번 읽어
+     * 대용량에서 I/O 가 두 배였음. */
     storage_append_fp_flush(table_path);
 
     fp = fopen(table_path, "r");
@@ -288,37 +291,42 @@ void storage_ensure_index(const char *table)
         goto mark_done;  /* 테이블 없으면 빈 인덱스 유지 */
     }
 
-    while (read_csv_record(fp, &record) == 1) {
-        char **fields = NULL;
-        int field_count = 0;
-        if (parse_csv_record(record, &fields, &field_count) == 0) {
-            if (id_col_index < field_count && fields[id_col_index] != NULL) {
-                int id = atoi(fields[id_col_index]);
-                if (id > 0) {
-                    bptree_insert(tree, id, row_idx);
-                }
-            }
-            free_string_array(fields, field_count);
-        }
-        free(record);
-        record = NULL;
-        row_idx++;
-    }
-    fclose(fp);
-
-    /* meta cache 도 동기화 */
     {
-        int meta_idx = -1;
-        for (i = 0; i < s_meta_count; ++i) {
-            if (strcmp(s_meta[i].table, table) == 0) { meta_idx = i; break; }
+        int max_id_seen = 0;
+        while (read_csv_record(fp, &record) == 1) {
+            char **fields = NULL;
+            int field_count = 0;
+            if (parse_csv_record(record, &fields, &field_count) == 0) {
+                if (id_col_index < field_count && fields[id_col_index] != NULL) {
+                    int id = atoi(fields[id_col_index]);
+                    if (id > 0) {
+                        bptree_insert(tree, id, row_idx);
+                        if (id > max_id_seen) max_id_seen = id;
+                    }
+                }
+                free_string_array(fields, field_count);
+            }
+            free(record);
+            record = NULL;
+            row_idx++;
         }
-        if (meta_idx < 0 && s_meta_count < STORAGE_META_CACHE_MAX) {
-            int max_id = 0, rc = 0;
-            meta_idx = s_meta_count++;
-            snprintf(s_meta[meta_idx].table, sizeof(s_meta[meta_idx].table), "%s", table);
-            scan_csv_meta(table_path, id_col_index, &max_id, &rc);
-            s_meta[meta_idx].next_id      = max_id + 1;
-            s_meta[meta_idx].next_row_idx = rc;
+        fclose(fp);
+
+        /* meta cache 를 동일 스캔 결과로 직접 업데이트 (scan_csv_meta 재호출 생략) */
+        {
+            int meta_idx = -1;
+            for (i = 0; i < s_meta_count; ++i) {
+                if (strcmp(s_meta[i].table, table) == 0) { meta_idx = i; break; }
+            }
+            if (meta_idx < 0 && s_meta_count < STORAGE_META_CACHE_MAX) {
+                meta_idx = s_meta_count++;
+                snprintf(s_meta[meta_idx].table,
+                         sizeof(s_meta[meta_idx].table), "%s", table);
+            }
+            if (meta_idx >= 0) {
+                s_meta[meta_idx].next_id      = max_id_seen + 1;
+                s_meta[meta_idx].next_row_idx = row_idx;
+            }
         }
     }
 

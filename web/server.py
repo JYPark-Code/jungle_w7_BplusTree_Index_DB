@@ -131,36 +131,70 @@ def run_bench(n: int = 1000000, order: int = 128, seed: int = 42) -> dict:
 
 
 def inject_payments(count: int = 100000) -> dict:
-    """더미 결제 로그 생성 + sqlparser로 주입."""
-    random.seed(42)
-    lines = [
-        "CREATE TABLE payments (id INT, user_id INT, amount INT, status VARCHAR, created_at INT);",
-    ]
-    base_ts = 1700000000
-    for i in range(1, count + 1):
-        uid = random.randint(1000, 9999)
-        amt = random.randint(100, 500000)
-        r = random.random()
-        if r < 0.02:
-            status = "TIMEOUT"
-        elif r < 0.07:
-            status = "FAIL"
-        else:
-            status = "SUCCESS"
-        ts = base_ts + i * 3
-        lines.append(
-            f"INSERT INTO payments (id, user_id, amount, status, created_at) "
-            f"VALUES ({i}, {uid}, {amt}, '{status}', {ts});"
-        )
-    sql = "\n".join(lines)
+    """더미 결제 로그 생성.
+    - count <= 200_000: SQL INSERT 경로 (BULK_INSERT_MODE)
+    - count >  200_000: Python 이 schema+CSV 파일을 직접 작성 (SQL 경로 우회).
+      대용량에선 sqlparser 파싱/executor 호출 비용이 지배적이므로
+      CSV 를 바로 쓰는 편이 수 배 빠름. 첫 SELECT 시 storage_ensure_index 가
+      CSV → B+ 트리 lazy rebuild 수행."""
     t0 = time.monotonic()
-    result = run_sql(sql, timeout=180, bulk=True)
+    mode = "sql-bulk" if count <= 200_000 else "csv-direct"
+
+    if mode == "sql-bulk":
+        random.seed(42)
+        lines = [
+            "CREATE TABLE payments (id INT, user_id INT, amount INT, status VARCHAR, created_at INT);",
+        ]
+        base_ts = 1700000000
+        for i in range(1, count + 1):
+            uid = random.randint(1000, 9999)
+            amt = random.randint(100, 500000)
+            r = random.random()
+            status = "TIMEOUT" if r < 0.02 else ("FAIL" if r < 0.07 else "SUCCESS")
+            ts = base_ts + i * 3
+            lines.append(
+                f"INSERT INTO payments (id, user_id, amount, status, created_at) "
+                f"VALUES ({i}, {uid}, {amt}, '{status}', {ts});"
+            )
+        sql = "\n".join(lines)
+        result = run_sql(sql, timeout=180, bulk=True)
+        error = result.get("error")
+    else:
+        error = _write_payments_csv_direct(count)
+
     elapsed = (time.monotonic() - t0) * 1000
     return {
         "count": count,
+        "mode": mode,
         "elapsed_ms": round(elapsed, 1),
-        "error": result.get("error"),
+        "error": error,
     }
+
+
+def _write_payments_csv_direct(count: int) -> "str | None":
+    """schema 파일과 CSV 를 Python 이 직접 작성. sqlparser 완전 우회."""
+    try:
+        random.seed(42)
+        schema_dir = ROOT / "data" / "schema"
+        tables_dir = ROOT / "data" / "tables"
+        schema_dir.mkdir(parents=True, exist_ok=True)
+        tables_dir.mkdir(parents=True, exist_ok=True)
+
+        (schema_dir / "payments.schema").write_text(
+            "id,INT\nuser_id,INT\namount,INT\nstatus,VARCHAR\ncreated_at,INT\n",
+            encoding="utf-8",
+        )
+        base_ts = 1700000000
+        with (tables_dir / "payments.csv").open("w", encoding="utf-8") as fp:
+            for i in range(1, count + 1):
+                uid = random.randint(1000, 9999)
+                amt = random.randint(100, 500000)
+                r = random.random()
+                status = "TIMEOUT" if r < 0.02 else ("FAIL" if r < 0.07 else "SUCCESS")
+                fp.write(f"{i},{uid},{amt},{status},{base_ts + i * 3}\n")
+        return None
+    except OSError as e:
+        return f"CSV 직접 작성 실패: {e}"
 
 
 def range_query(lo: int, hi: int) -> dict:

@@ -123,8 +123,22 @@ make clean
 
 # 웹 데모 (보너스, 발표 시연용)
 make              # sqlparser / benchmark 빌드 선행
-python3 web/server.py      # → http://localhost:8000 접속
+python3 web/server.py      # → http://localhost:8080 접속
+
+# 대용량 결제 로그 픽스처 (웹 데모 대용량 시연용, SQL INSERT 우회)
+python3 scripts/gen_payments_fixture.py          # 100만 건
+python3 scripts/gen_payments_fixture.py 10000000 # 1000만 건
+# 첫 SELECT 시 sqlparser 가 CSV → B+ 트리 lazy rebuild 수행.
 ```
+
+### 대용량 데이터 주입 전략
+
+| 규모 | 방식 | 근거 |
+|---|---|---|
+| ≤ 200k | SQL `INSERT` + `BULK_INSERT_MODE=1` | 파싱 / executor 오버헤드 수용 가능 |
+| > 200k | Python 직접 CSV 작성 (`scripts/gen_payments_fixture.py`) | sqlparser INSERT 파이프라인 우회로 1M=2.6s / 10M=24s |
+
+웹 UI `/api/inject` 는 `count` 기준으로 자동 분기 (200k 경계).
 
 ---
 
