@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,30 @@ typedef struct {
     int capacity;
     int row_width;
 } StorageRowBuffer;
+
+/* ─── 고정폭 바이너리 포맷 ──────────────────────────────────────
+ * 같은 테이블의 .bin 파일이 존재하면 storage_select_result_by_row_indices 가
+ * CSV 전체 로드 대신 fseek(row_idx * row_size) 로 O(K) 조회하게 된다.
+ * 컬럼별 고정 바이트 레이아웃 (native little-endian):
+ *   INT       → 4  (int32_t)
+ *   FLOAT     → 8  (double)
+ *   BOOLEAN   → 1  (uint8_t 0/1)
+ *   VARCHAR   → 32 (\0 padded)
+ *   DATE      → 16 (\0 padded 'YYYY-MM-DD')
+ *   DATETIME  → 24 (\0 padded 'YYYY-MM-DD HH:MM:SS')
+ * 전체 행은 이들의 연접. 생성 쪽은 scripts/gen_payments_fixture.py 등 Python 이 담당.
+ */
+#define BIN_VARCHAR_LEN  32
+#define BIN_DATE_LEN     16
+#define BIN_DATETIME_LEN 24
+
+static size_t bin_column_size(ColumnType t);
+static size_t bin_row_size(const ColDef *schema, int count);
+static int    build_bin_path(const char *table, char *out, size_t size);
+static int    load_binary_rows_by_indices(const char *bin_path,
+                                          const ColDef *schema, int schema_count,
+                                          const int *row_indices, int ri_count,
+                                          StorageRowBuffer *out);
 
 static int validate_insert_input(const char *table, char **values, int count);
 static int validate_delete_input(const char *table, const ParsedSQL *sql);
@@ -284,6 +309,62 @@ void storage_ensure_index(const char *table)
      * 동시에 수행한다. 이전에는 scan_csv_meta 가 같은 파일을 또 한 번 읽어
      * 대용량에서 I/O 가 두 배였음. */
     storage_append_fp_flush(table_path);
+
+    /* 바이너리 파일이 있으면 id 컬럼의 고정 offset 에서만 4바이트씩 읽어
+     * 트리를 채운다. CSV 라인 파싱 대비 훨씬 빠르고 I/O 도 최소화된다. */
+    {
+        char bin_path[STORAGE_PATH_MAX];
+        int used_bin = 0;
+        if (build_bin_path(table, bin_path, sizeof(bin_path)) == 0 &&
+            path_exists(bin_path)) {
+            FILE *bf = fopen(bin_path, "rb");
+            if (bf != NULL) {
+                size_t row_size = bin_row_size(schema, schema_count);
+                /* id 컬럼 이전까지의 누적 offset 계산 */
+                size_t id_off = 0;
+                int k;
+                for (k = 0; k < id_col_index; ++k) id_off += bin_column_size(schema[k].type);
+                if (row_size > 0) {
+                    int max_id_seen = 0;
+                    unsigned char *rb = malloc(row_size);
+                    if (rb != NULL) {
+                        while (fread(rb, row_size, 1, bf) == 1) {
+                            int32_t id;
+                            memcpy(&id, rb + id_off, 4);
+                            if (id > 0) {
+                                bptree_insert(tree, id, row_idx);
+                                if (id > max_id_seen) max_id_seen = id;
+                            }
+                            row_idx++;
+                        }
+                        free(rb);
+                        /* meta cache 업데이트 */
+                        {
+                            int meta_idx = -1;
+                            for (i = 0; i < s_meta_count; ++i) {
+                                if (strcmp(s_meta[i].table, table) == 0) { meta_idx = i; break; }
+                            }
+                            if (meta_idx < 0 && s_meta_count < STORAGE_META_CACHE_MAX) {
+                                meta_idx = s_meta_count++;
+                                snprintf(s_meta[meta_idx].table,
+                                         sizeof(s_meta[meta_idx].table), "%s", table);
+                            }
+                            if (meta_idx >= 0) {
+                                s_meta[meta_idx].next_id      = max_id_seen + 1;
+                                s_meta[meta_idx].next_row_idx = row_idx;
+                            }
+                        }
+                        used_bin = 1;
+                    }
+                }
+                fclose(bf);
+            }
+        }
+        if (used_bin) {
+            free(schema);
+            goto mark_done;
+        }
+    }
 
     fp = fopen(table_path, "r");
     if (fp == NULL) {
@@ -790,6 +871,40 @@ int storage_select_result_by_row_indices(const char *table, ParsedSQL *sql,
     if (load_schema(schema_path, &schema, &schema_count) != 0) {
         fprintf(stderr, "[storage] SELECT: table '%s' not found (schema missing)\n", table);
         return -1;
+    }
+
+    /* ★ 바이너리 fast path: data/tables/<table>.bin 이 있으면 fseek 기반 O(K) 조회.
+     * CSV 풀 로드 대신 필요한 행만 읽어 true O(log n + k) SELECT 를 실현. */
+    {
+        char bin_path[STORAGE_PATH_MAX];
+        if (build_bin_path(table, bin_path, sizeof(bin_path)) == 0 &&
+            path_exists(bin_path)) {
+            StorageRowBuffer bin_selection = {0};
+            if (load_binary_rows_by_indices(bin_path, schema, schema_count,
+                                            row_indices, count, &bin_selection) == 0) {
+                /* bin_selection 의 cell 소유권은 그대로 넘겨받는다 */
+                if (sort_selection(sql, schema, schema_count, &bin_selection) != 0) {
+                    free_row_buffer(&bin_selection, 1);
+                    goto cleanup;
+                }
+                if (sql->col_count == 1 && sql->columns != NULL) {
+                    char fn[16];
+                    char arg[64];
+                    if (parse_aggregate_call(sql->columns[0], fn, sizeof(fn), arg, sizeof(arg)) == 0) {
+                        status = build_rowset_for_aggregate(sql, schema, schema_count,
+                                                             &bin_selection, out);
+                        free_row_buffer(&bin_selection, 1);
+                        goto cleanup;
+                    }
+                }
+                status = build_rowset_from_selection(sql, schema, schema_count,
+                                                     &bin_selection, out);
+                free_row_buffer(&bin_selection, 1);
+                goto cleanup;
+            }
+            /* 바이너리 읽기 실패 → CSV 경로로 fallback */
+            free_row_buffer(&bin_selection, 1);
+        }
     }
 
     if (load_table_rows(table_path, schema_count, &rows) != 0) {
@@ -1493,6 +1608,163 @@ static void rebuild_index(const char *table, const char *table_path,
     }
 
     fclose(fp);
+}
+
+/* ─── 고정폭 바이너리 reader 구현 ──────────────────────────────── */
+
+static size_t bin_column_size(ColumnType t)
+{
+    switch (t) {
+        case TYPE_INT:      return 4;
+        case TYPE_FLOAT:    return 8;
+        case TYPE_BOOLEAN:  return 1;
+        case TYPE_VARCHAR:  return BIN_VARCHAR_LEN;
+        case TYPE_DATE:     return BIN_DATE_LEN;
+        case TYPE_DATETIME: return BIN_DATETIME_LEN;
+    }
+    return 0;
+}
+
+static size_t bin_row_size(const ColDef *schema, int count)
+{
+    size_t total = 0;
+    int i;
+    for (i = 0; i < count; ++i) {
+        total += bin_column_size(schema[i].type);
+    }
+    return total;
+}
+
+static int build_bin_path(const char *table, char *out, size_t size)
+{
+    int written = snprintf(out, size, "data/tables/%s.bin", table);
+    if (written < 0 || (size_t)written >= size) return -1;
+    return 0;
+}
+
+/* 한 행의 바이너리 바이트 버퍼를 스키마에 맞춰 문자열 필드 배열로 디코드. */
+static int decode_binary_row(const unsigned char *buf, const ColDef *schema,
+                             int schema_count, char ***out_fields)
+{
+    char **fields = calloc((size_t)schema_count, sizeof(*fields));
+    size_t offset = 0;
+    int i;
+    char tmp[64];
+
+    if (fields == NULL) return -1;
+
+    for (i = 0; i < schema_count; ++i) {
+        switch (schema[i].type) {
+            case TYPE_INT: {
+                int32_t v;
+                memcpy(&v, buf + offset, 4);
+                snprintf(tmp, sizeof(tmp), "%d", v);
+                fields[i] = dup_string(tmp);
+                offset += 4;
+                break;
+            }
+            case TYPE_FLOAT: {
+                double v;
+                memcpy(&v, buf + offset, 8);
+                snprintf(tmp, sizeof(tmp), "%g", v);
+                fields[i] = dup_string(tmp);
+                offset += 8;
+                break;
+            }
+            case TYPE_BOOLEAN: {
+                uint8_t v = buf[offset];
+                fields[i] = dup_string(v ? "1" : "0");
+                offset += 1;
+                break;
+            }
+            case TYPE_VARCHAR: {
+                char s[BIN_VARCHAR_LEN + 1];
+                memcpy(s, buf + offset, BIN_VARCHAR_LEN);
+                s[BIN_VARCHAR_LEN] = '\0';
+                fields[i] = dup_string(s);
+                offset += BIN_VARCHAR_LEN;
+                break;
+            }
+            case TYPE_DATE: {
+                char s[BIN_DATE_LEN + 1];
+                memcpy(s, buf + offset, BIN_DATE_LEN);
+                s[BIN_DATE_LEN] = '\0';
+                fields[i] = dup_string(s);
+                offset += BIN_DATE_LEN;
+                break;
+            }
+            case TYPE_DATETIME: {
+                char s[BIN_DATETIME_LEN + 1];
+                memcpy(s, buf + offset, BIN_DATETIME_LEN);
+                s[BIN_DATETIME_LEN] = '\0';
+                fields[i] = dup_string(s);
+                offset += BIN_DATETIME_LEN;
+                break;
+            }
+        }
+        if (fields[i] == NULL) {
+            free_string_array(fields, schema_count);
+            return -1;
+        }
+    }
+
+    *out_fields = fields;
+    return 0;
+}
+
+/* row_indices 각각에 대해 fseek(row_idx * row_size) + fread 로 행을 한 개씩만
+ * 읽어 선택 버퍼에 담는다. CSV 전체 로드 (O(N)) → O(K) 로 축약. */
+static int load_binary_rows_by_indices(const char *bin_path,
+                                       const ColDef *schema, int schema_count,
+                                       const int *row_indices, int ri_count,
+                                       StorageRowBuffer *out)
+{
+    FILE *fp;
+    size_t row_size;
+    unsigned char *row_buf;
+    int i;
+    int status = 0;
+
+    row_size = bin_row_size(schema, schema_count);
+    if (row_size == 0) return -1;
+
+    fp = fopen(bin_path, "rb");
+    if (fp == NULL) return -1;
+
+    row_buf = malloc(row_size);
+    if (row_buf == NULL) {
+        fclose(fp);
+        return -1;
+    }
+
+    out->rows = NULL;
+    out->count = 0;
+    out->capacity = 0;
+    out->row_width = schema_count;
+
+    for (i = 0; i < ri_count; ++i) {
+        int ri = row_indices[i];
+        char **fields = NULL;
+
+        if (ri < 0) continue;
+
+        if (fseek(fp, (long)ri * (long)row_size, SEEK_SET) != 0) break;
+        if (fread(row_buf, row_size, 1, fp) != 1) break;  /* EOF 또는 read fail */
+
+        if (decode_binary_row(row_buf, schema, schema_count, &fields) != 0) {
+            status = -1;
+            break;
+        }
+        if (append_row_buffer(out, fields) != 0) {
+            free_string_array(fields, schema_count);
+            status = -1;
+            break;
+        }
+    }
+
+    free(row_buf);
+    fclose(fp);
+    return status;
 }
 
 /* 입력: 테이블 CSV 경로, row 배열, row 길이

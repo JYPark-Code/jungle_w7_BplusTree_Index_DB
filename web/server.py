@@ -19,10 +19,15 @@ from pathlib import Path
 import json
 import os
 import random
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+
+# 바이너리 레이아웃 — src/storage.c 의 bin_column_size 와 정확히 일치
+_BIN_VARCHAR_LEN = 32
+_BIN_PAYMENTS_FMT = f"<iii{_BIN_VARCHAR_LEN}si"
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = Path(__file__).resolve().parent
@@ -172,7 +177,8 @@ def inject_payments(count: int = 100000) -> dict:
 
 
 def _write_payments_csv_direct(count: int) -> "str | None":
-    """schema 파일과 CSV 를 Python 이 직접 작성. sqlparser 완전 우회."""
+    """schema + CSV + 고정폭 BIN 세 파일을 Python 이 직접 작성. sqlparser 완전 우회.
+    BIN 이 있으면 storage_select_result_by_row_indices 가 O(K) fseek 경로를 탐."""
     try:
         random.seed(42)
         schema_dir = ROOT / "data" / "schema"
@@ -185,16 +191,26 @@ def _write_payments_csv_direct(count: int) -> "str | None":
             encoding="utf-8",
         )
         base_ts = 1700000000
-        with (tables_dir / "payments.csv").open("w", encoding="utf-8") as fp:
+        csv_path = tables_dir / "payments.csv"
+        bin_path = tables_dir / "payments.bin"
+        with csv_path.open("w", encoding="utf-8") as cf, \
+             bin_path.open("wb") as bf:
             for i in range(1, count + 1):
                 uid = random.randint(1000, 9999)
                 amt = random.randint(100, 500000)
                 r = random.random()
                 status = "TIMEOUT" if r < 0.02 else ("FAIL" if r < 0.07 else "SUCCESS")
-                fp.write(f"{i},{uid},{amt},{status},{base_ts + i * 3}\n")
+                ts = base_ts + i * 3
+                cf.write(f"{i},{uid},{amt},{status},{ts}\n")
+                bf.write(struct.pack(
+                    _BIN_PAYMENTS_FMT,
+                    i, uid, amt,
+                    status.encode("ascii").ljust(_BIN_VARCHAR_LEN, b"\0"),
+                    ts,
+                ))
         return None
     except OSError as e:
-        return f"CSV 직접 작성 실패: {e}"
+        return f"CSV/BIN 직접 작성 실패: {e}"
 
 
 def range_query(lo: int, hi: int) -> dict:
