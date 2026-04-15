@@ -336,6 +336,24 @@ table {
 .table-wrap tbody tr:last-child td { border-bottom: none; }
 .table-wrap tbody tr:hover td { background: rgba(0,0,0,0.02); }
 
+/* 장애/실패 행: 빨간 배경 + 흰 글씨로 한눈에 들어오게 */
+.table-wrap tbody tr.row-fail td,
+.table-wrap-dark tbody tr.row-fail td {
+  background: var(--red);
+  color: var(--white);
+  font-weight: 600;
+}
+.table-wrap tbody tr.row-fail:hover td,
+.table-wrap-dark tbody tr.row-fail:hover td {
+  background: #b8001a;
+}
+.table-wrap tbody tr.row-timeout td,
+.table-wrap-dark tbody tr.row-timeout td {
+  background: #7a0010;
+  color: var(--white);
+  font-weight: 600;
+}
+
 /* dark variant */
 .table-wrap-dark th {
   padding: 12px 16px; text-align: left;
@@ -350,7 +368,7 @@ table {
 .table-wrap-dark tbody tr:last-child td { border-bottom: none; }
 .table-wrap-dark tbody tr:hover td { background: rgba(255,255,255,0.02); }
 
-.more { color: var(--grey-60); font-size: 12px; margin-top: 10px; }
+.more { color: var(--grey-40); font-size: 13px; margin-top: 12px; }
 .badge-fast {
   display: inline-block; padding: 3px 12px; border-radius: 4px;
   font-size: 12px; font-weight: 600; font-family: var(--mono);
@@ -379,16 +397,57 @@ table {
 
 /* ═══════ LOG ═════════════════════════════════════════════════ */
 .log-outer {
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.10);
   border-radius: 8px; overflow: hidden;
 }
 #log {
   background: rgba(255,255,255,0.02);
   padding: 20px 24px;
-  font-family: var(--mono); font-size: 12px;
-  color: var(--grey-60); line-height: 2;
-  height: 180px; overflow-y: auto; white-space: pre-wrap;
+  font-family: var(--mono); font-size: 13.5px;
+  color: var(--white); line-height: 1.8;
+  height: 200px; overflow-y: auto; white-space: pre-wrap;
+  letter-spacing: 0.01em;
 }
+
+/* ═══════ SPINNER / LOADING ═══════════════════════════════════ */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: var(--white);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -2px; margin-left: 8px;
+}
+.btn-loading {
+  display: inline-flex; align-items: center; gap: 10px;
+}
+.inline-note {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--grey-40); font-weight: 400;
+  margin-left: 12px;
+}
+.inline-note.is-active { color: var(--white); }
+
+/* ═══════ CHART CAPTION ═══════════════════════════════════════ */
+.chart-caption {
+  display: block; margin-top: 14px;
+  font-size: 13px; line-height: 1.7; color: var(--grey-20);
+  font-family: var(--font);
+}
+.chart-caption b { color: var(--white); font-weight: 600; }
+.chart-caption .formula {
+  display: inline-block;
+  font-family: var(--mono); font-size: 12.5px;
+  padding: 2px 8px; margin: 0 2px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px; color: var(--white);
+}
+
+/* 작은 글씨들 가독성 보정 */
+.result-header { font-size: 14px; color: var(--grey-20); }
+.big-label { font-size: 15px; color: var(--grey-10); }
+.badge-fast, .badge-ok { font-size: 13px; }
 
 /* ═══════ DIVIDER ═════════════════════════════════════════════ */
 .divider-light { border: none; border-top: 1px solid var(--grey-10); }
@@ -463,6 +522,7 @@ table {
           <input type="number" class="input-w" id="inject-count" value="100000" min="1000" max="1000000" step="10000" />
         </div>
         <button class="btn btn-d-border" id="btn-inject">Inject data</button>
+        <span id="inject-note" class="inline-note"></span>
         <span id="inject-status" class="status-text"></span>
       </div>
     </div>
