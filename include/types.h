@@ -220,6 +220,8 @@ int        storage_create(const char *table, char **col_defs, int count);
  *   RowSet 과 그 안의 모든 메모리를 재귀 해제. NULL safe.
  */
 int  storage_select_result(const char *table, ParsedSQL *sql, RowSet **out);
+int  storage_select_result_by_row_index(const char *table, ParsedSQL *sql,
+                                        int row_index, RowSet **out);
 void print_rowset(FILE *out, const RowSet *rs);
 void rowset_free(RowSet *rs);
 
