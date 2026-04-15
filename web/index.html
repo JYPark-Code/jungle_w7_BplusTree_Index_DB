@@ -471,59 +471,59 @@ table {
 }
 .compare-card:hover { border-color: rgba(255,255,255,0.16); }
 .compare-card h4 {
-  font-size: 16px;              /* 13 → 16 (×1.23) — 카드 대제목 */
-  font-weight: 600; letter-spacing: 0.1em;
+  font-size: 19px;              /* ×1.5 from 13 — 카드 대제목 */
+  font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--grey-40); margin-bottom: 6px;
+  color: var(--grey-40); margin-bottom: 10px;
 }
 .compare-card .subhead {
-  font-size: 14px;              /* 12 → 14 — 카드 본문 설명 */
-  color: var(--grey-60); margin-bottom: 16px;
-  line-height: 1.55;
+  font-size: 17px;              /* ×1.5 from 12 — 카드 본문 설명 */
+  color: var(--grey-60); margin-bottom: 22px;
+  line-height: 1.6;
 }
-/* canvas 래퍼 — Chart.js maintainAspectRatio:false 와 짝 */
+/* canvas 래퍼 — 텍스트 키운 만큼 차트 영역도 비율 유지하여 확장 */
 .compare-card .canvas-box {
   position: relative;
   width: 100%;
-  height: 260px;
+  height: 320px;               /* 260 → 320 (×1.23) */
   flex-shrink: 0;
 }
 .compare-card canvas { width: 100% !important; height: 100% !important; }
 /* big-number 는 강조 의도 — 크기 유지 (요구사항: 변경 금지) */
-.compare-card .big-number { font-size: clamp(44px, 3.6vw, 58px); margin-top: 14px; line-height: 1; }
-/* big-label 은 측정값 텍스트 — 14px 로 상향 */
-.compare-card .big-label { color: var(--grey-20); font-size: 14px; margin-top: 8px; line-height: 1.5; }
+.compare-card .big-number { font-size: clamp(44px, 3.6vw, 58px); margin-top: 18px; line-height: 1; }
+/* big-label 은 측정값 텍스트 ×1.5 */
+.compare-card .big-label { color: var(--grey-20); font-size: 17px; margin-top: 10px; line-height: 1.55; }
 
 /* 3rd 컬럼 — 차이 설명 카드 */
 .compare-card.delta-card {
   background: rgba(213,0,28,0.05);
   border: 1px solid rgba(213,0,28,0.18);
   border-left: 3px solid var(--red);
-  min-height: 420px;
+  min-height: 460px;
 }
 .compare-card.delta-card h4 { color: var(--red); }
 .compare-delta-body {
-  font-size: 14px;              /* 13.5 → 14 — ③ 카드 본문 단락 */
+  font-size: 17px;              /* ×1.5 from 13.5 — ③ 카드 본문 단락 */
   line-height: 1.75; color: var(--grey-10);
-  margin-top: 12px;
+  margin-top: 14px;
 }
 .compare-delta-body b { color: var(--white); }
 .compare-delta-body .formula {
   display: inline-block;
-  font-family: var(--mono); font-size: 13px;   /* 12 → 13 — 코드 키워드 뱃지 */
-  padding: 3px 9px; margin: 0 2px;
+  font-family: var(--mono); font-size: 16px;   /* ×1.5 from 12 — 코드 키워드 뱃지 */
+  padding: 4px 11px; margin: 0 3px;
   background: rgba(255,255,255,0.08);
   border-radius: 4px; color: var(--white);
 }
 
 /* Range 연동 배지 — 헤더 파라미터 줄 */
 .range-link {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 16px; margin-bottom: 14px;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 10px 20px; margin-bottom: 16px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 999px;
-  font-size: 15px;             /* 12.5 → 15 (×1.2) — 헤더 파라미터 */
+  font-size: 18px;             /* ×1.5 from 12.5 — 헤더 파라미터 */
   color: var(--grey-20);
   font-family: var(--mono);
 }
@@ -563,41 +563,41 @@ table {
 
 /* 컨트롤 행: 버튼이 인풋들과 같은 기준선(flex-end)에서 정렬되도록 */
 .tree-controls {
-  display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap;
+  display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap;
 }
 .tree-controls .field-slider {
-  display: flex; flex-direction: column; gap: 8px; min-width: 240px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 280px;
 }
 .tree-controls .field-slider input[type="range"] {
-  width: 240px; accent-color: var(--red);
+  width: 280px; accent-color: var(--red);
 }
 .tree-controls .field-slider .slider-val {
-  font-family: var(--mono); font-size: 13px; color: var(--white);
+  font-family: var(--mono); font-size: 17px; color: var(--white);   /* 13 → 17 */
   font-weight: 600;
 }
 .tree-controls .field-slider .slider-meta {
-  font-size: 11px; color: var(--grey-60);
+  font-size: 14px; color: var(--grey-60);                           /* 11 → 14 */
 }
 
 .tree-help {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-top: 18px;
+  gap: 18px;
+  margin-top: 22px;
 }
 @media (max-width: 720px) { .tree-help { grid-template-columns: 1fr; } }
 .tree-help-item {
-  padding: 14px 18px;
+  padding: 18px 22px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 8px;
-  font-size: 13px; line-height: 1.6; color: var(--grey-20);
+  font-size: 17px; line-height: 1.65; color: var(--grey-20);        /* 13 → 17 */
 }
 .tree-help-item b { color: var(--white); }
 .tree-help-item code {
   background: rgba(255,255,255,0.08);
-  padding: 1px 6px; border-radius: 3px;
-  font-family: var(--mono); font-size: 12px;
+  padding: 2px 8px; border-radius: 3px;
+  font-family: var(--mono); font-size: 15px;                        /* 12 → 15 */
 }
 
 /* 트리 레이아웃: SVG 2/3 + 인사이트 1/3 */
@@ -632,8 +632,8 @@ table {
   margin-left: auto;
 }
 .zoom-btn {
-  font-family: var(--font); font-size: 13px; font-weight: 600;
-  padding: 8px 12px; min-width: 38px;
+  font-family: var(--font); font-size: 16px; font-weight: 600;     /* 13 → 16 */
+  padding: 10px 16px; min-width: 48px;
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.15);
   color: var(--white); border-radius: 6px;
@@ -642,7 +642,7 @@ table {
 }
 .zoom-btn:hover { background: rgba(213,0,28,0.16); border-color: var(--red); }
 .zoom-hint {
-  font-size: 11.5px; color: var(--grey-60); margin-left: 4px;
+  font-size: 14px; color: var(--grey-60); margin-left: 6px;        /* 11.5 → 14 */
 }
 .tree-svg-wrap.placeholder {
   color: var(--grey-60); font-style: italic;
@@ -654,28 +654,28 @@ table {
   border: 1px solid rgba(213,0,28,0.16);
   border-left: 3px solid var(--red);
   border-radius: 10px;
-  padding: 22px 24px;
-  font-size: 13px; line-height: 1.7; color: var(--grey-10);
+  padding: 26px 28px;
+  font-size: 17px; line-height: 1.75; color: var(--grey-10);        /* 13 → 17 */
 }
 .tree-insight h5 {
-  font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+  font-size: 16px; font-weight: 700; letter-spacing: 0.12em;        /* 12 → 16 */
   text-transform: uppercase; color: var(--red);
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
-.tree-insight ol { padding-left: 18px; margin-bottom: 16px; }
-.tree-insight li { margin-bottom: 10px; }
+.tree-insight ol { padding-left: 22px; margin-bottom: 18px; }
+.tree-insight li { margin-bottom: 12px; }
 .tree-insight b { color: var(--white); }
 .tree-insight code {
-  font-family: var(--mono); font-size: 12px;
+  font-family: var(--mono); font-size: 15px;                        /* 12 → 15 */
   background: rgba(255,255,255,0.08);
-  padding: 1px 6px; border-radius: 3px; color: var(--white);
+  padding: 2px 8px; border-radius: 3px; color: var(--white);
 }
 .tree-insight .insight-cta {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 10px 16px; margin-top: 6px;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 20px; margin-top: 8px;
   background: var(--red); color: var(--white);
   border: none; border-radius: 6px;
-  font-family: var(--font); font-size: 12.5px; font-weight: 600;
+  font-family: var(--font); font-size: 16px; font-weight: 600;      /* 12.5 → 16 */
   cursor: pointer; transition: background 0.2s;
 }
 .tree-insight .insight-cta:hover { background: #b8001a; }
@@ -702,8 +702,8 @@ table {
 .tree-edge.is-path { stroke: var(--red); stroke-width: 2.4; animation: tree-node-highlight 1.6s ease-in-out 2; }
 
 .tree-legend {
-  display: flex; flex-wrap: wrap; gap: 18px;
-  margin-top: 14px; font-size: 12.5px; color: var(--grey-40);
+  display: flex; flex-wrap: wrap; gap: 22px;
+  margin-top: 18px; font-size: 16px; color: var(--grey-40);         /* 12.5 → 16 */
 }
 .tree-legend .sw {
   display: inline-block; width: 14px; height: 14px; border-radius: 3px;
@@ -727,13 +727,19 @@ table {
   display: flex; flex-direction: column;
 }
 .range-illust h5 {
-  font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+  font-size: 18px;             /* 12 → 18 */
+  font-weight: 700; letter-spacing: 0.1em;
   text-transform: uppercase; color: var(--grey-60);
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 .range-illust p {
-  font-size: 12.5px; color: var(--grey-60); line-height: 1.5; margin-bottom: 14px;
+  font-size: 16px;             /* 12.5 → 16 */
+  color: var(--grey-60); line-height: 1.6; margin-bottom: 18px;
 }
+/* SVG 안의 텍스트 (legend, 노드, 마커 등) 일괄 1.5× — viewBox scale 기반 */
+.range-illust svg text { font-size: 16px !important; font-weight: 500; }
+.range-illust svg .legend-line text,
+.range-illust svg text[font-size="10"] { font-size: 14px !important; }
 #range-tree-svg { width: 100%; height: auto; max-height: 340px; }
 .range-illust .highlight-path path {
   transition: stroke 0.4s, stroke-width 0.4s;
@@ -909,44 +915,44 @@ table {
             <g class="ping-node" id="rn-root">
               <rect x="190" y="20" width="100" height="36" rx="5" fill="#0e0e12"/>
               <text x="240" y="43" text-anchor="middle" fill="#fff"
-                    font-family="JetBrains Mono" font-size="13" font-weight="600">25,75</text>
+                    font-family="JetBrains Mono" font-size="17" font-weight="700">25,75</text>
             </g>
             <!-- internal 2 -->
             <g class="ping-node" id="rn-i1">
               <rect x="80"  y="135" width="100" height="36" rx="5" fill="#1e1e24" stroke="#3c3c44"/>
               <text x="130" y="158" text-anchor="middle" fill="#fff"
-                    font-family="JetBrains Mono" font-size="12">10,15,20</text>
+                    font-family="JetBrains Mono" font-size="16">10,15,20</text>
             </g>
             <g class="ping-node" id="rn-i2">
               <rect x="300" y="135" width="100" height="36" rx="5" fill="#1e1e24" stroke="#3c3c44"/>
               <text x="350" y="158" text-anchor="middle" fill="#fff"
-                    font-family="JetBrains Mono" font-size="12">50,60,70</text>
+                    font-family="JetBrains Mono" font-size="16">50,60,70</text>
             </g>
 
             <!-- leaves -->
             <g class="ping-node" id="rn-l1">
               <rect x="20"  y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
               <text x="60"  y="265" text-anchor="middle" fill="#0e0e12"
-                    font-family="JetBrains Mono" font-size="11">1,5,9</text>
+                    font-family="JetBrains Mono" font-size="15">1,5,9</text>
             </g>
             <g class="ping-node" id="rn-l2">
               <rect x="150" y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
               <text x="190" y="265" text-anchor="middle" fill="#0e0e12"
-                    font-family="JetBrains Mono" font-size="11">25,40</text>
+                    font-family="JetBrains Mono" font-size="15">25,40</text>
             </g>
             <g class="ping-node" id="rn-l3">
               <rect x="250" y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
               <text x="290" y="265" text-anchor="middle" fill="#0e0e12"
-                    font-family="JetBrains Mono" font-size="11">50,60</text>
+                    font-family="JetBrains Mono" font-size="15">50,60</text>
             </g>
             <g class="ping-node" id="rn-l4">
               <rect x="380" y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
               <text x="420" y="265" text-anchor="middle" fill="#0e0e12"
-                    font-family="JetBrains Mono" font-size="11">80,99</text>
+                    font-family="JetBrains Mono" font-size="15">80,99</text>
             </g>
 
             <!-- legend -->
-            <g font-family="Inter" font-size="10" fill="#7c7d82">
+            <g font-family="Inter" font-size="14" fill="#7c7d82">
               <text x="16" y="340">루트 · 내부 INT · 리프 LEAF + linked list</text>
             </g>
           </svg>
@@ -1058,16 +1064,16 @@ table {
             <li><b>Order = <span id="tree-insight-order">4</span></b> —
               키 N-1 개, 자식 N 개 분기. 프로덕션에선 128~256 으로 납작하게 유지.</li>
           </ol>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
-            <span style="color:var(--grey-20);font-size:13px">id</span>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+            <span style="color:var(--grey-20);font-size:17px">id</span>
             <input type="number" id="tree-search-target" value="50" min="1"
-                   style="font-family:var(--mono);font-size:13px;background:#14141a;color:#fff;
+                   style="font-family:var(--mono);font-size:17px;background:#14141a;color:#fff;
                           border:1px solid rgba(255,255,255,0.15);border-radius:4px;
-                          padding:6px 10px;width:80px"/>
+                          padding:9px 14px;width:110px"/>
             <button class="insight-cta" id="btn-tree-search">▶ 찾기 경로 시각화</button>
           </div>
-          <div id="search-trace" style="margin-top:14px;font-family:var(--mono);font-size:12px;
-                                         color:var(--grey-20);line-height:1.6;
+          <div id="search-trace" style="margin-top:18px;font-family:var(--mono);font-size:16px;
+                                         color:var(--grey-20);line-height:1.7;
                                          min-height:1em;"></div>
         </div>
       </div>
