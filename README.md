@@ -45,6 +45,7 @@ SELECT * FROM users WHERE name = 'Alice';              -- 선형 탐색 유지
 - Range query 지원: `WHERE id BETWEEN 100 AND 200` (리프 linked list 활용)
 - `bptree_print()` — 삽입/split 과정 ASCII 시각화
 - 레코드 수별 탐색 시간 측정 테이블 출력 (O(log n) vs O(n) 증명)
+- **웹 데모 (보너스):** 결제/트랜잭션 로그 시연 — 정적 HTML + Python stdlib 중개 서버로 장애 구간 range query 시각화 (`web/`)
 
 ---
 
@@ -71,6 +72,10 @@ SELECT * FROM users WHERE name = 'Alice';              -- 선형 탐색 유지
 │   └── test_bptree.c    ← NEW: B+ 트리 단위 테스트
 ├── bench/
 │   └── benchmark.c      ← NEW: 100만 건 성능 측정
+├── web/                 ← NEW (보너스): 발표 시연용 웹 UI
+│   ├── index.html       ← SQL 입력창 + 결과 테이블 + 벤치 차트
+│   ├── app.js           ← fetch 로 /api/query, /api/bench 호출
+│   └── server.py        ← http.server 중개 (stdlib만, 의존성 0)
 ├── .devcontainer/
 ├── .github/workflows/build.yml
 ├── Makefile
@@ -106,6 +111,10 @@ make test         # 단위 테스트 (Week 6 회귀 포함)
 make bench        # 100만 건 성능 벤치마크
 make valgrind     # 메모리 누수 검사
 make clean
+
+# 웹 데모 (보너스, 발표 시연용)
+make              # sqlparser / benchmark 빌드 선행
+python3 web/server.py      # → http://localhost:8000 접속
 ```
 
 ---
@@ -118,6 +127,7 @@ make clean
 | 정환 | `executor.c` WHERE id 분기 + 기존 SQL 처리기 이식 검증 |
 | 민철 | `storage.c` auto-increment + `bptree_insert` 연동 |
 | 규태 | `bench/benchmark.c` + 더미 데이터 생성 + README |
+| 규태 (보너스) | `web/` 웹 시연 UI (정적 HTML + Python stdlib 중개 서버) |
 
 ---
 
@@ -146,6 +156,7 @@ main
 | MP2 | `bptree.c` search + insert (split 없이) 완성 → B, C 실제 연결 |
 | MP3 | split 로직 완성 + 전체 통합 빌드 통과 |
 | MP4 | 100만 건 테스트 + valgrind 0 → dev → main 머지 |
+| MP5 (선택) | `web/` 데모 PR 머지 — 본진 회귀 0 확인 후에만 |
 
 ---
 
@@ -172,14 +183,42 @@ chore:    설정, 환경
 
 ---
 
-## 성능 목표
+## 성능 목표 및 실측 (MP4)
 
-| 레코드 수 | id 검색 (B+ 트리) | name 검색 (선형) |
-|---|---|---|
-| 100,000 | < 1ms | ~ 수십ms |
-| 1,000,000 | < 5ms | ~ 수백ms |
+`make bench` 실측 (N = 1,000,000, order = 128, Linux x86_64):
 
-*실측값은 `make bench` 결과로 업데이트 예정*
+| 연산 | 건수 | 소요 | 처리량 |
+|---|---|---|---|
+| INSERT | 1,000,000 | 0.755 s | **1,325,300 ops/s** |
+| SEARCH | 1,000,000 | 0.407 s | **2,455,631 ops/s** |
+| RANGE (폭 100) | 1,000 회 | 0.001 s | **1,110,769 qps** (hits 100,000) |
+| VERIFY | 1,000,000 / 1,000,000 | — | 100.0 % 조회 성공 |
+
+- INSERT 평균 **0.75 µs/op**, SEARCH 평균 **0.41 µs/op** — 100만 건 규모에서 단건 조회가 1µs 미만
+- `valgrind --leak-check=full` leak 0 (CI 자동 검증)
+- MP4 완료 기준(100만 건 + valgrind 0) 충족
+
+---
+
+## 발표 시연 시나리오 — 결제/트랜잭션 로그 (보너스)
+
+> **핵심 멘트:** *"장애 발생 시 특정 시간 구간의 트랜잭션 로그를 빠르게 조회해야 한다 — B+Tree range query 가 O(log n + k) 로 해결한다."*
+
+**데이터 모델:**
+```sql
+CREATE TABLE payments (
+    id INT, user_id INT, amount INT,
+    status TEXT,        -- 'SUCCESS' | 'FAIL' | 'TIMEOUT'
+    created_at INT      -- Unix timestamp
+);
+```
+
+**UI 3 버튼 시나리오 (~3분):**
+1. **[ 더미 주입 ]** — 10만~100만 건 결제 로그, 실패율 5% / 타임아웃 2%
+2. **[ 장애 구간 조회 (range) ]** — `WHERE id BETWEEN A AND B` 로 특정 시간 구간 추출, 1ms 내 반환
+3. **[ 선형 vs 인덱스 비교 ]** — 같은 범위를 선형 탐색으로도 돌려 Chart.js 막대그래프 2개 (400배 단축 시각화)
+
+**발표자 스토리:** *"새벽 3시 결제 장애. 로그에서 3:00~3:15 구간만 뽑아야 한다. id 는 시간순 auto-increment 이므로 id 범위 = 시간 구간 proxy."*
 
 ---
 
