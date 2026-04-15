@@ -285,25 +285,30 @@ def range_query(lo: int, hi: int) -> dict:
     }
 
 
-def run_tree_shape(n: int = 20, order: int = 4) -> dict:
+def run_tree_shape(n: int = 20, order: int = 4, snapshots: int = 0) -> dict:
     """./tree_shape 실행 → bptree_print stdout 반환.
-    웹 데모 C 섹션: 실제 B+ 트리가 어떻게 성장하는지 라이브 시각화."""
+    snapshots>0 이면 중간 단계 스냅샷들을 함께 담아 FE 에서 replay 가능하게 한다."""
     if not TREE_SHAPE.exists():
         return {"error": "tree_shape 바이너리 없음. `make tree_shape` 실행하세요."}
     if n < 1: n = 1
     if n > 200: n = 200
     if order < 3: order = 4
     if order > 32: order = 32
+    if snapshots < 0: snapshots = 0
+    if snapshots > 20: snapshots = 20  # 브라우저 replay 예산
+
+    args = [str(TREE_SHAPE), str(n), str(order)]
+    if snapshots > 0:
+        args += ["--snapshots", str(snapshots)]
+
     try:
-        proc = subprocess.run(
-            [str(TREE_SHAPE), str(n), str(order)],
-            capture_output=True, text=True, timeout=5,
-        )
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=5)
     except subprocess.TimeoutExpired:
         return {"error": "tree_shape timeout"}
     return {
         "n": n,
         "order": order,
+        "snapshots": snapshots,
         "output": proc.stdout,
         "stderr": proc.stderr,
         "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
@@ -433,7 +438,8 @@ class Handler(BaseHTTPRequestHandler):
             # C 섹션 용 — B+ 트리 insert + bptree_print 라이브 출력
             n = int(data.get("n", 20))
             order = int(data.get("order", 4))
-            self._json(200, run_tree_shape(n, order))
+            snapshots = int(data.get("snapshots", 0))
+            self._json(200, run_tree_shape(n, order, snapshots))
 
         else:
             self._json(404, {"error": "not found"})

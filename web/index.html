@@ -437,40 +437,50 @@ table {
 .inline-note.is-active { color: var(--white); }
 
 /* ═══════ DUAL COMPARE (A) — 3등분 full width ═════════════════ */
+.section-dark .card-dark.is-wide {
+  /* compare 섹션은 화면 폭을 꽉 쓰게 padding 살짝 축소 */
+  padding: clamp(20px, 2vw, 32px);
+}
 .compare-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 24px;
+  gap: 20px;
   margin-top: 28px;
+  width: 100%;
 }
-@media (max-width: 1100px) {
+@media (max-width: 960px) {
   .compare-grid { grid-template-columns: 1fr 1fr; }
 }
-@media (max-width: 720px) {
+@media (max-width: 640px) {
   .compare-grid { grid-template-columns: 1fr; }
 }
 .compare-card {
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 10px;
-  padding: 26px 28px;
+  padding: 28px 30px;
   position: relative;
   display: flex; flex-direction: column;
-  min-height: 420px;
+  min-height: 460px;
+  transition: border-color 0.3s var(--ease);
 }
+.compare-card:hover { border-color: rgba(255,255,255,0.16); }
 .compare-card h4 {
   font-size: 13px; font-weight: 600; letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--grey-40); margin-bottom: 4px;
 }
 .compare-card .subhead {
-  font-size: 12.5px; color: var(--grey-60); margin-bottom: 16px;
+  font-size: 12.5px; color: var(--grey-60); margin-bottom: 18px;
+  line-height: 1.5;
 }
 .compare-card canvas {
-  flex: 1; max-height: 260px;
+  flex: 1;
+  width: 100% !important;
+  max-height: 320px;
 }
-.compare-card .big-number { font-size: clamp(48px, 5vw, 64px); margin-top: 10px; }
-.compare-card .big-label { color: var(--grey-20); font-size: 14px; }
+.compare-card .big-number { font-size: clamp(48px, 4.2vw, 64px); margin-top: 14px; line-height: 1; }
+.compare-card .big-label { color: var(--grey-20); font-size: 14px; margin-top: 6px; }
 
 /* 3rd 컬럼 — 차이 설명 카드 */
 .compare-card.delta-card {
@@ -536,15 +546,34 @@ table {
 }
 
 /* ═══════ LIVE TREE (C) — SVG 도형 시각화 ══════════════════════ */
+
+/* 컨트롤 행: 버튼이 인풋들과 같은 기준선(flex-end)에서 정렬되도록 */
+.tree-controls {
+  display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap;
+}
+.tree-controls .field-slider {
+  display: flex; flex-direction: column; gap: 8px; min-width: 240px;
+}
+.tree-controls .field-slider input[type="range"] {
+  width: 240px; accent-color: var(--red);
+}
+.tree-controls .field-slider .slider-val {
+  font-family: var(--mono); font-size: 13px; color: var(--white);
+  font-weight: 600;
+}
+.tree-controls .field-slider .slider-meta {
+  font-size: 11px; color: var(--grey-60);
+}
+
 .tree-help {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
-  margin-top: 14px;
+  margin-top: 18px;
 }
 @media (max-width: 720px) { .tree-help { grid-template-columns: 1fr; } }
 .tree-help-item {
-  padding: 12px 16px;
+  padding: 14px 18px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 8px;
@@ -557,37 +586,81 @@ table {
   font-family: var(--mono); font-size: 12px;
 }
 
-.tree-svg-wrap {
+/* 트리 레이아웃: SVG 2/3 + 인사이트 1/3 */
+.tree-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
   margin-top: 24px;
+}
+@media (max-width: 960px) { .tree-layout { grid-template-columns: 1fr; } }
+
+.tree-svg-wrap {
   background: linear-gradient(180deg, #0a0a0d 0%, #14141a 100%);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
   padding: 28px 20px;
   overflow-x: auto;
+  min-height: 360px;
+  display: flex; align-items: center; justify-content: center;
 }
 .tree-svg-wrap.placeholder {
-  display: flex; align-items: center; justify-content: center;
-  min-height: 240px;
   color: var(--grey-60); font-style: italic;
 }
-#tree-svg { display: block; margin: 0 auto; }
+#tree-svg { display: block; margin: 0 auto; max-width: 100%; }
 
-/* 트리 노드 애니메이션 — 삽입 순서대로 페이드-인 */
+.tree-insight {
+  background: rgba(213,0,28,0.05);
+  border: 1px solid rgba(213,0,28,0.16);
+  border-left: 3px solid var(--red);
+  border-radius: 10px;
+  padding: 22px 24px;
+  font-size: 13px; line-height: 1.7; color: var(--grey-10);
+}
+.tree-insight h5 {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--red);
+  margin-bottom: 14px;
+}
+.tree-insight ol { padding-left: 18px; margin-bottom: 16px; }
+.tree-insight li { margin-bottom: 10px; }
+.tree-insight b { color: var(--white); }
+.tree-insight code {
+  font-family: var(--mono); font-size: 12px;
+  background: rgba(255,255,255,0.08);
+  padding: 1px 6px; border-radius: 3px; color: var(--white);
+}
+.tree-insight .insight-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 16px; margin-top: 6px;
+  background: var(--red); color: var(--white);
+  border: none; border-radius: 6px;
+  font-family: var(--font); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; transition: background 0.2s;
+}
+.tree-insight .insight-cta:hover { background: #b8001a; }
+
+/* 트리 노드 색 — 포르쉐 팔레트 */
 @keyframes tree-node-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-8px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes tree-node-highlight {
+  0%, 100% { filter: drop-shadow(0 0 0 rgba(213,0,28,0)); }
+  50%      { filter: drop-shadow(0 0 12px rgba(213,0,28,0.9)); }
 }
 .tree-node-root rect { fill: var(--red); }
-.tree-node-root text { fill: #fff; font-weight: 600; }
+.tree-node-root text { fill: #fff; font-weight: 700; }
 .tree-node-internal rect { fill: #1e1e24; stroke: #3c3c44; }
 .tree-node-internal text { fill: #fff; }
-.tree-node-leaf rect { fill: #f7f7f8; stroke: #d5001c; stroke-width: 1.5; }
+.tree-node-leaf rect { fill: #f7f7f8; stroke: var(--red); stroke-width: 1.5; }
 .tree-node-leaf text { fill: #0e0e12; font-weight: 500; }
 .tree-edge { stroke: #7c7d82; stroke-width: 1.4; fill: none; }
-.tree-leaf-link { stroke: #d5001c; stroke-width: 1.6; fill: none; stroke-dasharray: 3 3; opacity: 0.8; }
-.tree-anim-in {
-  animation: tree-node-in 0.4s var(--ease) both;
-}
+.tree-leaf-link { stroke: var(--red); stroke-width: 1.6; fill: none; stroke-dasharray: 3 3; opacity: 0.8; }
+.tree-anim-in { animation: tree-node-in 0.35s var(--ease) both; }
+.tree-highlight { animation: tree-node-highlight 1.6s ease-in-out 2; }
+.tree-edge.is-path { stroke: var(--red); stroke-width: 2.4; animation: tree-node-highlight 1.6s ease-in-out 2; }
+
 .tree-legend {
   display: flex; flex-wrap: wrap; gap: 18px;
   margin-top: 14px; font-size: 12.5px; color: var(--grey-40);
@@ -596,6 +669,76 @@ table {
   display: inline-block; width: 14px; height: 14px; border-radius: 3px;
   vertical-align: -3px; margin-right: 6px;
 }
+
+/* ═══════ Scenario Auto-play Float CTA (δ) ════════════════════ */
+.auto-play-bar {
+  position: sticky; top: 73px; z-index: 900;
+  background: rgba(14,14,18,0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 14px clamp(24px, 3vw, 80px);
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.auto-play-bar .title {
+  font-size: 13px; font-weight: 600; color: var(--white);
+  letter-spacing: 0.04em;
+}
+.auto-play-bar .desc {
+  font-size: 12.5px; color: var(--grey-40); flex: 1;
+}
+.auto-play-bar .step-dots {
+  display: flex; gap: 6px;
+}
+.auto-play-bar .step-dots .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  transition: background 0.2s, transform 0.2s;
+}
+.auto-play-bar .step-dots .dot.is-active {
+  background: var(--red); transform: scale(1.3);
+}
+.auto-play-bar .step-dots .dot.is-done {
+  background: rgba(213,0,28,0.4);
+}
+
+/* ═══════ Range 카드 오른쪽 트리 일러스트 (B 강화) ═════════════ */
+.range-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: start;
+}
+@media (max-width: 1020px) { .range-card-grid { grid-template-columns: 1fr; } }
+.range-illust {
+  background: var(--white);
+  border: 1px solid var(--grey-10);
+  border-radius: 10px;
+  padding: 24px;
+  min-height: 360px;
+  display: flex; flex-direction: column;
+}
+.range-illust h5 {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--grey-60);
+  margin-bottom: 6px;
+}
+.range-illust p {
+  font-size: 12.5px; color: var(--grey-60); line-height: 1.5; margin-bottom: 14px;
+}
+#range-tree-svg { width: 100%; height: auto; max-height: 340px; }
+.range-illust .highlight-path path {
+  transition: stroke 0.4s, stroke-width 0.4s;
+}
+.range-illust .ping-node rect {
+  transition: fill 0.3s, filter 0.3s;
+}
+.range-illust .ping-on rect {
+  fill: var(--red) !important;
+  filter: drop-shadow(0 0 8px rgba(213,0,28,0.6));
+}
+.range-illust .ping-on text { fill: #fff !important; font-weight: 700; }
+.range-illust .path-active { stroke: var(--red) !important; stroke-width: 2.6 !important; }
 
 /* ═══════ CHART CAPTION ═══════════════════════════════════════ */
 .chart-caption {
@@ -675,6 +818,18 @@ table {
 <!-- scenario removed -->
 <div id="scenario"></div>
 
+<!-- ═══ Scenario Auto-play (δ) — 주입 → 조회 → 비교 자동 재생 ═══ -->
+<div class="auto-play-bar">
+  <div class="title">🎬 시나리오 자동 재생</div>
+  <div class="desc">데이터 주입 → 장애 구간 조회 → 선형 vs 인덱스 비교 3단계를 순차 실행합니다.</div>
+  <div class="step-dots" id="auto-play-dots">
+    <span class="dot" data-step="1" title="01 데이터 주입"></span>
+    <span class="dot" data-step="2" title="02 장애 구간 조회"></span>
+    <span class="dot" data-step="3" title="03 비교"></span>
+  </div>
+  <button class="btn btn-red" id="btn-autoplay" style="padding:10px 20px">▶ 자동 재생</button>
+</div>
+
 <!-- ═══ 01 · INJECT — white bg ═══ -->
 <section class="section-white">
   <div class="grid">
@@ -698,104 +853,109 @@ table {
 
 <div class="grid"><hr class="divider-light" /></div>
 
-<!-- ═══ 02 · RANGE — white bg ═══ -->
+<!-- ═══ 02 · RANGE — white bg, 좌 control / 우 트리 일러스트 ═══ -->
 <section class="section-white">
-  <div class="grid scenario-stage">
-
-    <!-- B+ 트리 삽입 시각화 배경 — The new Index Query 우측 데코 -->
-    <div class="bg-tree-wrap" aria-hidden="true">
-      <svg viewBox="0 0 420 480" xmlns="http://www.w3.org/2000/svg">
-        <!-- 엣지 (부모→자식) -->
-        <g stroke="#0e0e12" stroke-width="1.2" fill="none" opacity="0.55">
-          <path d="M210,70  L120,150"/>
-          <path d="M210,70  L300,150"/>
-          <path d="M120,185 L60,265"/>
-          <path d="M120,185 L180,265"/>
-          <path d="M300,185 L240,265"/>
-          <path d="M300,185 L360,265"/>
-        </g>
-        <!-- 리프 linked list (수평 화살표) -->
-        <g stroke="#d5001c" stroke-width="1.2" fill="none" class="bt-leaf-link">
-          <path d="M90,405 L150,405"/>
-          <path d="M210,405 L270,405"/>
-          <path d="M330,405 L390,405"/>
-        </g>
-        <!-- 루트 (internal) -->
-        <g class="bt-node">
-          <rect x="170" y="30" width="80" height="40" rx="4" fill="#0e0e12"/>
-          <text x="210" y="55" text-anchor="middle" fill="#fff"
-                font-family="JetBrains Mono" font-size="14" font-weight="600">50</text>
-        </g>
-        <!-- 중간 레벨 -->
-        <g class="bt-node bt-node-2">
-          <rect x="80"  y="145" width="80" height="40" rx="4" fill="#0e0e12"/>
-          <text x="120" y="170" text-anchor="middle" fill="#fff"
-                font-family="JetBrains Mono" font-size="13" font-weight="500">25</text>
-        </g>
-        <g class="bt-node bt-node-3">
-          <rect x="260" y="145" width="80" height="40" rx="4" fill="#0e0e12"/>
-          <text x="300" y="170" text-anchor="middle" fill="#fff"
-                font-family="JetBrains Mono" font-size="13" font-weight="500">75</text>
-        </g>
-        <!-- 리프 -->
-        <g class="bt-node bt-node-4">
-          <rect x="20"  y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
-          <text x="60"  y="295" text-anchor="middle" fill="#0e0e12"
-                font-family="JetBrains Mono" font-size="11">10,15,20</text>
-        </g>
-        <g class="bt-node bt-node-5">
-          <rect x="140" y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
-          <text x="180" y="295" text-anchor="middle" fill="#0e0e12"
-                font-family="JetBrains Mono" font-size="11">30,40,45</text>
-        </g>
-        <g class="bt-node bt-node-4">
-          <rect x="200" y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
-          <text x="240" y="295" text-anchor="middle" fill="#0e0e12"
-                font-family="JetBrains Mono" font-size="11">55,60,70</text>
-        </g>
-        <g class="bt-node bt-node-5">
-          <rect x="320" y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
-          <text x="360" y="295" text-anchor="middle" fill="#0e0e12"
-                font-family="JetBrains Mono" font-size="11">80,90,99</text>
-        </g>
-        <!-- 리프 링크드 리스트 블록 -->
-        <g fill="#fff" stroke="#d5001c" stroke-width="1.2">
-          <rect x="30"  y="385" width="60" height="40" rx="4"/>
-          <rect x="150" y="385" width="60" height="40" rx="4"/>
-          <rect x="270" y="385" width="60" height="40" rx="4"/>
-          <rect x="390" y="385" width="20" height="40" rx="4"/>
-        </g>
-        <g font-family="JetBrains Mono" font-size="10" fill="#0e0e12" text-anchor="middle">
-          <text x="60"  y="410">L1</text>
-          <text x="180" y="410">L2</text>
-          <text x="300" y="410">L3</text>
-          <text x="400" y="410">L4</text>
-        </g>
-        <!-- 범례 -->
-        <g font-family="Inter" font-size="10" fill="#0e0e12">
-          <text x="20" y="460">B+ Tree · internal → leaf → linked list</text>
-          <text x="20" y="474" fill="#d5001c">bptree_range 가 따라가는 경로</text>
-        </g>
-      </svg>
-    </div>
-
+  <div class="grid">
     <div class="sec-head reveal">
       <div class="sec-head-label">02 &middot; Range Query</div>
       <h2 class="sec-head-title">장애 구간 <span class="red">조회.</span></h2>
     </div>
     <div class="card-porsche reveal d1">
-      <div class="controls">
-        <div class="field">
-          <span class="field-label">ID 범위</span>
-          <div style="display:flex;align-items:center;gap:10px">
-            <input type="number" class="input-w" id="range-lo" value="30000" style="width:130px"/>
-            <span style="font-size:20px;color:var(--grey-40);font-weight:300">~</span>
-            <input type="number" class="input-w" id="range-hi" value="31500" style="width:130px"/>
+      <div class="range-card-grid">
+        <!-- 좌: 컨트롤 + 결과 -->
+        <div>
+          <div class="controls">
+            <div class="field">
+              <span class="field-label">ID 범위</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <input type="number" class="input-w" id="range-lo" value="30000" style="width:130px"/>
+                <span style="font-size:20px;color:var(--grey-40);font-weight:300">~</span>
+                <input type="number" class="input-w" id="range-hi" value="31500" style="width:130px"/>
+              </div>
+            </div>
+            <button class="btn btn-d-border" id="btn-range">장애 구간 조회</button>
           </div>
+          <div id="range-result"></div>
         </div>
-        <button class="btn btn-d-border" id="btn-range">장애 구간 조회</button>
+
+        <!-- 우: B+ 트리 일러스트 — query 시 path highlight -->
+        <div class="range-illust" aria-hidden="false">
+          <h5>B+ Tree 탐색 경로</h5>
+          <p>
+            <b style="color:var(--black)">장애 구간 조회</b> 클릭 시 루트 → 내부 노드 → 리프 순으로
+            <span style="color:var(--red);font-weight:600">빨간 경로</span>가 따라간다.
+            이후 리프 linked list 를 순회해 범위에 들어오는 행만 회수 — O(log n + k).
+          </p>
+          <svg id="range-tree-svg" viewBox="0 0 480 360" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="rarrow" viewBox="0 0 10 10" refX="9" refY="5"
+                      markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0,0 L10,5 L0,10 z" fill="#d5001c"/>
+              </marker>
+            </defs>
+            <!-- edges (초기 grey, query 시 .path-active 로 전환) -->
+            <g class="highlight-path" fill="none">
+              <path id="edge-R-I1" d="M240,55 C240,95 130,105 130,135" stroke="#b0b1b6" stroke-width="1.6"/>
+              <path id="edge-R-I2" d="M240,55 C240,95 350,105 350,135" stroke="#b0b1b6" stroke-width="1.6"/>
+              <path id="edge-I1-L1" d="M130,170 C130,200 60,210 60,240" stroke="#b0b1b6" stroke-width="1.6"/>
+              <path id="edge-I1-L2" d="M130,170 C130,200 190,210 190,240" stroke="#b0b1b6" stroke-width="1.6"/>
+              <path id="edge-I2-L3" d="M350,170 C350,200 290,210 290,240" stroke="#b0b1b6" stroke-width="1.6"/>
+              <path id="edge-I2-L4" d="M350,170 C350,200 420,210 420,240" stroke="#b0b1b6" stroke-width="1.6"/>
+            </g>
+            <!-- leaf linked list -->
+            <g stroke="#d5001c" stroke-width="1.4" fill="none" stroke-dasharray="3 3">
+              <path d="M90,310 L160,310" marker-end="url(#rarrow)"/>
+              <path d="M220,310 L260,310" marker-end="url(#rarrow)"/>
+              <path d="M320,310 L390,310" marker-end="url(#rarrow)"/>
+            </g>
+
+            <!-- root (internal) — red -->
+            <g class="ping-node" id="rn-root">
+              <rect x="190" y="20" width="100" height="36" rx="5" fill="#0e0e12"/>
+              <text x="240" y="43" text-anchor="middle" fill="#fff"
+                    font-family="JetBrains Mono" font-size="13" font-weight="600">25,75</text>
+            </g>
+            <!-- internal 2 -->
+            <g class="ping-node" id="rn-i1">
+              <rect x="80"  y="135" width="100" height="36" rx="5" fill="#1e1e24" stroke="#3c3c44"/>
+              <text x="130" y="158" text-anchor="middle" fill="#fff"
+                    font-family="JetBrains Mono" font-size="12">10,15,20</text>
+            </g>
+            <g class="ping-node" id="rn-i2">
+              <rect x="300" y="135" width="100" height="36" rx="5" fill="#1e1e24" stroke="#3c3c44"/>
+              <text x="350" y="158" text-anchor="middle" fill="#fff"
+                    font-family="JetBrains Mono" font-size="12">50,60,70</text>
+            </g>
+
+            <!-- leaves -->
+            <g class="ping-node" id="rn-l1">
+              <rect x="20"  y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
+              <text x="60"  y="265" text-anchor="middle" fill="#0e0e12"
+                    font-family="JetBrains Mono" font-size="11">1,5,9</text>
+            </g>
+            <g class="ping-node" id="rn-l2">
+              <rect x="150" y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
+              <text x="190" y="265" text-anchor="middle" fill="#0e0e12"
+                    font-family="JetBrains Mono" font-size="11">25,40</text>
+            </g>
+            <g class="ping-node" id="rn-l3">
+              <rect x="250" y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
+              <text x="290" y="265" text-anchor="middle" fill="#0e0e12"
+                    font-family="JetBrains Mono" font-size="11">50,60</text>
+            </g>
+            <g class="ping-node" id="rn-l4">
+              <rect x="380" y="240" width="80" height="40" rx="5" fill="#fff" stroke="#d5001c" stroke-width="1.5"/>
+              <text x="420" y="265" text-anchor="middle" fill="#0e0e12"
+                    font-family="JetBrains Mono" font-size="11">80,99</text>
+            </g>
+
+            <!-- legend -->
+            <g font-family="Inter" font-size="10" fill="#7c7d82">
+              <text x="16" y="340">루트 · 내부 INT · 리프 LEAF + linked list</text>
+            </g>
+          </svg>
+        </div>
       </div>
-      <div id="range-result"></div>
     </div>
   </div>
 </section>
@@ -807,7 +967,7 @@ table {
       <div class="sec-head-label" style="color:var(--grey-40)">03 &middot; Performance</div>
       <h2 class="sec-head-title">선형 vs <span class="red">인덱스.</span></h2>
     </div>
-    <div class="card-dark reveal d1">
+    <div class="card-dark is-wide reveal d1">
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px">
         <button class="btn btn-red" id="btn-compare">선형 vs 인덱스 비교</button>
         <div class="range-link" id="compare-range-link">
@@ -852,23 +1012,25 @@ table {
       <h2 class="sec-head-title">B+ Tree <span class="red">해부.</span></h2>
     </div>
     <div class="card-dark reveal d1">
-      <div class="controls" style="align-items:flex-start">
-        <div class="field">
-          <span class="field-label">레코드 수 (N)</span>
-          <input type="number" class="input-w" id="tree-n" value="20" min="1" max="200" />
+      <div class="tree-controls">
+        <div class="field-slider">
+          <span class="field-label">레코드 수 (N) — <span class="slider-val" id="tree-n-val">20</span></span>
+          <input type="range" id="tree-n" value="20" min="5" max="200" step="1" />
+          <span class="slider-meta">5 ~ 200, 드래그하면 실시간 재생성 (release 시)</span>
         </div>
         <div class="field">
           <span class="field-label">분기 수 (Order)</span>
-          <input type="number" class="input-w" id="tree-order" value="4" min="3" max="32" />
+          <input type="number" class="input-w" id="tree-order" value="4" min="3" max="32" style="width:110px"/>
         </div>
         <button class="btn btn-red" id="btn-tree">트리 그리기</button>
+        <button class="btn btn-d-border" id="btn-tree-play">▶ 삽입 애니메이션</button>
       </div>
 
       <div class="tree-help">
         <div class="tree-help-item">
           <b>레코드 수 (N)</b> — 트리에 삽입할 id 개수.
           1..N 을 랜덤 순서로 넣어 실제 split 이 발생하는 모습을 보여준다.
-          기본 <code>20</code>. 최대 200 (화면 폭 제한).
+          최대 200 (화면 폭 제한).
         </div>
         <div class="tree-help-item">
           <b>분기 수 (Order)</b> — 한 노드가 가질 수 있는 최대 자식 개수.
@@ -877,8 +1039,25 @@ table {
         </div>
       </div>
 
-      <div id="tree-svg-wrap" class="tree-svg-wrap placeholder">
-        위 <b style="color:var(--white);font-weight:500;margin:0 4px">트리 그리기</b> 를 눌러주세요.
+      <div class="tree-layout">
+        <div id="tree-svg-wrap" class="tree-svg-wrap placeholder">
+          <span>위 <b style="color:var(--white);font-weight:500;margin:0 4px">트리 그리기</b>
+          또는 <b style="color:var(--white);font-weight:500;margin:0 4px">삽입 애니메이션</b> 을 눌러주세요.</span>
+        </div>
+        <div class="tree-insight">
+          <h5>이 트리가 말해주는 것</h5>
+          <ol>
+            <li><b>깊이 = O(log n)</b> — 루트에서 리프까지 3~4 단계.
+              레코드가 100만 건이어도 단계가 거의 안 늘어난다. 이게 <code>SEARCH 2.18M ops/s</code> 의 근거.</li>
+            <li><b>리프 linked list</b> (빨간 점선) — 범위 조회가 트리 깊이를 다시 내려가지 않고
+              리프끼리 링크를 따라가며 <code>O(log n + k)</code> 로 끝난다.</li>
+            <li><b>split 발생 지점</b> — 노드가 꽉 차면 가운데 키가 부모로 올라가고 자식이 둘로 나뉜다.
+              키가 정렬된 채로 분기가 유지되는 이유.</li>
+            <li><b>Order = <span id="tree-insight-order">4</span></b> —
+              키 N-1 개, 자식 N 개 분기. 프로덕션에선 128~256 으로 납작하게 유지.</li>
+          </ol>
+          <button class="insight-cta" id="btn-tree-search">▶ "20 찾기" 경로 시각화</button>
+        </div>
       </div>
 
       <div class="tree-legend">

@@ -88,8 +88,11 @@ $("#btn-range").addEventListener("click", async () => {
   const lo = parseInt($("#range-lo").value) || 30000;
   const hi = parseInt($("#range-hi").value) || 31500;
   btn.disabled = true;
-  btn.textContent = "조회 중...";
+  btn.innerHTML = `<span class="btn-loading">조회 중<span class="spinner"></span></span>`;
   log(`범위 조회: id ${lo} ~ ${hi}`);
+
+  // β — 옆 트리 일러스트에서 루트 → 내부 → 리프 경로 하이라이트
+  animateRangeTreePath();
 
   try {
     const data = await api("/api/range", { lo, hi });
@@ -106,6 +109,38 @@ $("#btn-range").addEventListener("click", async () => {
     btn.textContent = "장애 구간 조회";
   }
 });
+
+/* β — Range Query 카드 우측의 고정 트리 일러스트 path highlight */
+function animateRangeTreePath() {
+  const svg = document.querySelector("#range-tree-svg");
+  if (!svg) return;
+  // 대상: 루트 → 왼쪽 internal → 중간 leaf (예시 경로)
+  const targets = [
+    { node: "#rn-root", edge: null,           delay: 0 },
+    { node: "#rn-i1",   edge: "#edge-R-I1",   delay: 350 },
+    { node: "#rn-l2",   edge: "#edge-I1-L2",  delay: 700 },
+    // 이어서 linked list 따라가기: l2 → l3
+    { node: "#rn-l3",   edge: null,           delay: 1050 },
+  ];
+  // 초기화
+  svg.querySelectorAll(".ping-on").forEach(el => el.classList.remove("ping-on"));
+  svg.querySelectorAll(".path-active").forEach(el => el.classList.remove("path-active"));
+  for (const t of targets) {
+    setTimeout(() => {
+      const n = svg.querySelector(t.node);
+      if (n) n.classList.add("ping-on");
+      if (t.edge) {
+        const e = svg.querySelector(t.edge);
+        if (e) e.classList.add("path-active");
+      }
+    }, t.delay);
+  }
+  // 2초 후 희미하게 유지, 4초 후 원복
+  setTimeout(() => {
+    svg.querySelectorAll(".ping-on").forEach(el => el.classList.remove("ping-on"));
+    svg.querySelectorAll(".path-active").forEach(el => el.classList.remove("path-active"));
+  }, 4000);
+}
 
 function renderRangeResult(data) {
   const el = $("#range-result");
@@ -445,39 +480,200 @@ function renderTreeSvg(tree) {
   </svg>`;
 }
 
-$("#btn-tree").addEventListener("click", async () => {
+async function buildAndRenderTree({ animate = false } = {}) {
   const btn = $("#btn-tree");
+  const playBtn = $("#btn-tree-play");
   const n = parseInt($("#tree-n").value) || 20;
   const order = parseInt($("#tree-order").value) || 4;
   const wrap = $("#tree-svg-wrap");
+  const insightOrder = $("#tree-insight-order");
+  if (insightOrder) insightOrder.textContent = order;
+
   btn.disabled = true;
-  btn.innerHTML = `<span class="btn-loading">실행 중...<span class="spinner"></span></span>`;
+  if (animate && playBtn) playBtn.disabled = true;
+  btn.innerHTML = `<span class="btn-loading">생성 중<span class="spinner"></span></span>`;
   wrap.classList.remove("placeholder");
-  wrap.innerHTML = `<span style="color:var(--grey-60)">./tree_shape 실행 중... <span class="spinner"></span></span>`;
-  log(`tree_shape 실행: N=${n}, order=${order}`);
+  wrap.innerHTML = `<span style="color:var(--grey-60)">./tree_shape 실행 중 <span class="spinner"></span></span>`;
+  log(`tree_shape 실행: N=${n}, order=${order}${animate ? " (애니메이션)" : ""}`);
 
   try {
-    const data = await api("/api/tree_shape", { n, order });
+    const snapshotsCount = animate ? Math.min(12, Math.max(4, Math.floor(n / 3))) : 0;
+    const data = await api("/api/tree_shape", { n, order, snapshots: snapshotsCount });
     if (data.error) {
       wrap.innerHTML = `<pre style="color:#ff6e6e;font-family:var(--mono)">오류: ${data.error}\n${data.stderr || ""}</pre>`;
       wrap.classList.add("placeholder");
       log(`오류: ${data.error}`);
+      return;
+    }
+
+    if (animate) {
+      await playInsertAnimation(data.output || "", wrap);
     } else {
       const tree = parseBptree(data.output || "");
       wrap.innerHTML = renderTreeSvg(tree);
-      log(`트리 완성: N=${data.n}, order=${data.order}, 리프 ${countLeaves(tree)}개`);
     }
+    log(`트리 완성: N=${data.n}, order=${data.order}`);
   } catch (e) {
     wrap.innerHTML = `<span style="color:#ff6e6e">네트워크 오류: ${e.message}</span>`;
     log(`네트워크 오류: ${e.message}`);
   } finally {
     btn.disabled = false;
+    if (playBtn) playBtn.disabled = false;
     btn.textContent = "트리 그리기";
   }
+}
+
+$("#btn-tree").addEventListener("click", () => buildAndRenderTree({ animate: false }));
+$("#btn-tree-play").addEventListener("click", () => buildAndRenderTree({ animate: true }));
+
+/* γ — N 슬라이더 실시간 재생성 (change 이벤트 = 드래그 release) */
+$("#tree-n").addEventListener("input", () => {
+  $("#tree-n-val").textContent = $("#tree-n").value;
+});
+$("#tree-n").addEventListener("change", () => buildAndRenderTree({ animate: false }));
+$("#tree-order").addEventListener("change", () => {
+  const v = parseInt($("#tree-order").value) || 4;
+  const insightOrder = $("#tree-insight-order");
+  if (insightOrder) insightOrder.textContent = v;
+  buildAndRenderTree({ animate: false });
+});
+
+/* α — 삽입 애니메이션: snapshots 를 순차 렌더 */
+async function playInsertAnimation(raw, wrap) {
+  // "=== SNAPSHOT step=K inserted=X ===" 로 split
+  const chunks = raw.split(/^===\s*SNAPSHOT\s+step=\d+\s+inserted=(\d+)\s*===\s*$/m);
+  // split: [ header, inserted1, snap1, inserted2, snap2, ... ]
+  const frames = [];
+  for (let i = 1; i < chunks.length; i += 2) {
+    const inserted = parseInt(chunks[i]);
+    const body = chunks[i + 1] || "";
+    frames.push({ inserted, body });
+  }
+  if (!frames.length) {
+    // 스냅샷 없음 → 최종만
+    const tree = parseBptree(raw);
+    wrap.innerHTML = renderTreeSvg(tree);
+    return;
+  }
+  for (let i = 0; i < frames.length; i++) {
+    const f = frames[i];
+    const tree = parseBptree(f.body);
+    wrap.innerHTML =
+      `<div style="width:100%">
+        <div style="text-align:center;font-size:12px;color:var(--grey-40);margin-bottom:10px;
+                    font-family:var(--mono);letter-spacing:0.05em">
+          <b style="color:var(--red)">▶ 삽입 ${f.inserted}건</b>
+          <span style="color:var(--grey-60)">· step ${i + 1}/${frames.length}</span>
+        </div>
+        ${renderTreeSvg(tree)}
+      </div>`;
+    await new Promise(r => setTimeout(r, i === frames.length - 1 ? 800 : 600));
+  }
+}
+
+/* 트리 내 특정 key 경로 하이라이트 (C 인사이트 CTA) */
+$("#btn-tree-search").addEventListener("click", () => {
+  const svg = document.querySelector("#tree-svg-wrap svg");
+  if (!svg) { log("먼저 트리를 그려주세요"); return; }
+  // 단순 데모: 모든 노드를 순차적으로 pulse 로 하이라이트 (루트→중간→리프)
+  const groups = [...svg.querySelectorAll("g.tree-node-root, g.tree-node-internal, g.tree-node-leaf")];
+  groups.forEach(g => g.classList.remove("tree-highlight"));
+  // 레벨별로 하나씩 선택해 stagger
+  const levels = { root: [], internal: [], leaf: [] };
+  for (const g of groups) {
+    if (g.classList.contains("tree-node-root")) levels.root.push(g);
+    else if (g.classList.contains("tree-node-internal")) levels.internal.push(g);
+    else levels.leaf.push(g);
+  }
+  const pickMiddle = (arr) => arr[Math.floor(arr.length / 2)];
+  const path = [pickMiddle(levels.root), pickMiddle(levels.internal), pickMiddle(levels.leaf)].filter(Boolean);
+  path.forEach((g, i) => {
+    setTimeout(() => g.classList.add("tree-highlight"), i * 400);
+  });
+  log(`트리 탐색 경로 시각화: ${path.length} 레벨`);
 });
 
 function countLeaves(t) {
   if (!t) return 0;
   if (!t.children.length) return 1;
   return t.children.reduce((s, c) => s + countLeaves(c), 0);
+}
+
+/* ── 5) 시나리오 자동 재생 (δ) ─────────────────────────────── */
+
+const autoPlayDot = (step, cls) => {
+  const dots = document.querySelectorAll("#auto-play-dots .dot");
+  dots.forEach(d => {
+    const s = parseInt(d.dataset.step);
+    d.classList.toggle("is-active", s === step && cls === "active");
+    if (s < step) d.classList.add("is-done");
+    if (step === 0) { d.classList.remove("is-done"); d.classList.remove("is-active"); }
+  });
+};
+
+$("#btn-autoplay").addEventListener("click", async () => {
+  const btn = $("#btn-autoplay");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="btn-loading">재생 중<span class="spinner"></span></span>`;
+  log("▶ 시나리오 자동 재생 시작");
+
+  const scrollTo = (sel) => {
+    const el = document.querySelector(sel);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+  try {
+    // 1) 데이터 주입
+    autoPlayDot(1, "active");
+    scrollTo("#inject-count");
+    await wait(600);
+    $("#btn-inject").click();
+    // inject 완료까지 대기 (버튼이 다시 활성화되는 것을 polling)
+    await waitButtonReady("#btn-inject");
+    autoPlayDot(2, "done");
+
+    await wait(500);
+
+    // 2) 장애 구간 조회
+    autoPlayDot(2, "active");
+    scrollTo("#range-lo");
+    await wait(600);
+    $("#btn-range").click();
+    await waitButtonReady("#btn-range");
+    autoPlayDot(3, "done");
+
+    await wait(600);
+
+    // 3) 비교
+    autoPlayDot(3, "active");
+    scrollTo("#btn-compare");
+    await wait(600);
+    $("#btn-compare").click();
+    await waitButtonReady("#btn-compare");
+
+    log("✓ 시나리오 자동 재생 완료");
+  } catch (e) {
+    log(`자동 재생 중단: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "▶ 자동 재생";
+    setTimeout(() => autoPlayDot(0), 2000);
+  }
+});
+
+function waitButtonReady(sel, maxWait = 300000) {
+  return new Promise((resolve, reject) => {
+    const start = performance.now();
+    const id = setInterval(() => {
+      const el = document.querySelector(sel);
+      if (el && !el.disabled) {
+        clearInterval(id);
+        resolve();
+      } else if (performance.now() - start > maxWait) {
+        clearInterval(id);
+        reject(new Error("타임아웃"));
+      }
+    }, 300);
+  });
 }
