@@ -119,7 +119,9 @@ function renderRangeResult(data) {
 
   if (data.rows && data.rows.length > 0) {
     const cols = Object.keys(data.rows[0]);
-    html += '<div class="table-wrap-dark"><table><thead><tr>';
+    // light 테이블 (table-wrap): 일반 행은 검은 글씨로 가독성 확보.
+    // 장애 행만 .row-fail / .row-timeout 로 대비를 줌.
+    html += '<div class="table-wrap"><table><thead><tr>';
     for (const c of cols) html += `<th>${c}</th>`;
     html += '</tr></thead><tbody>';
     for (const row of data.rows.slice(0, 50)) {

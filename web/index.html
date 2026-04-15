@@ -336,22 +336,29 @@ table {
 .table-wrap tbody tr:last-child td { border-bottom: none; }
 .table-wrap tbody tr:hover td { background: rgba(0,0,0,0.02); }
 
-/* 장애/실패 행: 빨간 배경 + 흰 글씨로 한눈에 들어오게 */
+/* 장애 (FAIL): 빨간 배경 + 흰 글씨 + bold — 한눈에 꽂힘 */
 .table-wrap tbody tr.row-fail td,
 .table-wrap-dark tbody tr.row-fail td {
   background: var(--red);
-  color: var(--white);
+  color: var(--white) !important;
   font-weight: 600;
 }
 .table-wrap tbody tr.row-fail:hover td,
 .table-wrap-dark tbody tr.row-fail:hover td {
   background: #b8001a;
+  color: var(--white) !important;
 }
+/* TIMEOUT: 옅은 회색 + 검은 글씨 + bold — FAIL 과 구분되면서 가독성 유지 */
 .table-wrap tbody tr.row-timeout td,
 .table-wrap-dark tbody tr.row-timeout td {
-  background: #7a0010;
-  color: var(--white);
+  background: var(--grey-10);
+  color: var(--black) !important;
   font-weight: 600;
+}
+.table-wrap tbody tr.row-timeout:hover td,
+.table-wrap-dark tbody tr.row-timeout:hover td {
+  background: var(--grey-20);
+  color: var(--black) !important;
 }
 
 /* dark variant */
