@@ -462,22 +462,24 @@ table {
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 10px;
-  padding: 22px 22px;
+  padding: 28px 28px;          /* 텍스트 1.5x 에 맞춰 padding 1.27x */
   position: relative;
   display: flex; flex-direction: column;
-  min-height: 440px;
+  min-height: 460px;            /* fixed height → min-height (자동 확장) */
   transition: border-color 0.3s var(--ease);
-  min-width: 0;  /* grid child 가 canvas 내용 때문에 축소 안되는 문제 방지 */
+  min-width: 0;
 }
 .compare-card:hover { border-color: rgba(255,255,255,0.16); }
 .compare-card h4 {
-  font-size: 13px; font-weight: 600; letter-spacing: 0.1em;
+  font-size: 16px;              /* 13 → 16 (×1.23) — 카드 대제목 */
+  font-weight: 600; letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--grey-40); margin-bottom: 4px;
+  color: var(--grey-40); margin-bottom: 6px;
 }
 .compare-card .subhead {
-  font-size: 12px; color: var(--grey-60); margin-bottom: 14px;
-  line-height: 1.5;
+  font-size: 14px;              /* 12 → 14 — 카드 본문 설명 */
+  color: var(--grey-60); margin-bottom: 16px;
+  line-height: 1.55;
 }
 /* canvas 래퍼 — Chart.js maintainAspectRatio:false 와 짝 */
 .compare-card .canvas-box {
@@ -487,8 +489,10 @@ table {
   flex-shrink: 0;
 }
 .compare-card canvas { width: 100% !important; height: 100% !important; }
+/* big-number 는 강조 의도 — 크기 유지 (요구사항: 변경 금지) */
 .compare-card .big-number { font-size: clamp(44px, 3.6vw, 58px); margin-top: 14px; line-height: 1; }
-.compare-card .big-label { color: var(--grey-20); font-size: 13.5px; margin-top: 6px; }
+/* big-label 은 측정값 텍스트 — 14px 로 상향 */
+.compare-card .big-label { color: var(--grey-20); font-size: 14px; margin-top: 8px; line-height: 1.5; }
 
 /* 3rd 컬럼 — 차이 설명 카드 */
 .compare-card.delta-card {
@@ -499,26 +503,28 @@ table {
 }
 .compare-card.delta-card h4 { color: var(--red); }
 .compare-delta-body {
-  font-size: 13.5px; line-height: 1.75; color: var(--grey-10);
+  font-size: 14px;              /* 13.5 → 14 — ③ 카드 본문 단락 */
+  line-height: 1.75; color: var(--grey-10);
   margin-top: 12px;
 }
 .compare-delta-body b { color: var(--white); }
 .compare-delta-body .formula {
   display: inline-block;
-  font-family: var(--mono); font-size: 12px;
-  padding: 2px 8px; margin: 0 2px;
+  font-family: var(--mono); font-size: 13px;   /* 12 → 13 — 코드 키워드 뱃지 */
+  padding: 3px 9px; margin: 0 2px;
   background: rgba(255,255,255,0.08);
   border-radius: 4px; color: var(--white);
 }
 
-/* Range 연동 배지 */
+/* Range 연동 배지 — 헤더 파라미터 줄 */
 .range-link {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 14px; margin-bottom: 12px;
+  padding: 8px 16px; margin-bottom: 14px;
   background: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 999px;
-  font-size: 12.5px; color: var(--grey-20);
+  font-size: 15px;             /* 12.5 → 15 (×1.2) — 헤더 파라미터 */
+  color: var(--grey-20);
   font-family: var(--mono);
 }
 .range-link b { color: var(--white); font-weight: 600; }
@@ -704,38 +710,6 @@ table {
   vertical-align: -3px; margin-right: 6px;
 }
 
-/* ═══════ Scenario Auto-play Float CTA (δ) ════════════════════ */
-.auto-play-bar {
-  position: sticky; top: 73px; z-index: 900;
-  background: rgba(14,14,18,0.92);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  padding: 14px clamp(24px, 3vw, 80px);
-  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-}
-.auto-play-bar .title {
-  font-size: 13px; font-weight: 600; color: var(--white);
-  letter-spacing: 0.04em;
-}
-.auto-play-bar .desc {
-  font-size: 12.5px; color: var(--grey-40); flex: 1;
-}
-.auto-play-bar .step-dots {
-  display: flex; gap: 6px;
-}
-.auto-play-bar .step-dots .dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: rgba(255,255,255,0.15);
-  transition: background 0.2s, transform 0.2s;
-}
-.auto-play-bar .step-dots .dot.is-active {
-  background: var(--red); transform: scale(1.3);
-}
-.auto-play-bar .step-dots .dot.is-done {
-  background: rgba(213,0,28,0.4);
-}
-
 /* ═══════ Range 카드 오른쪽 트리 일러스트 (B 강화) ═════════════ */
 .range-card-grid {
   display: grid;
@@ -851,18 +825,6 @@ table {
 
 <!-- scenario removed -->
 <div id="scenario"></div>
-
-<!-- ═══ Scenario Auto-play (δ) — 주입 → 조회 → 비교 자동 재생 ═══ -->
-<div class="auto-play-bar">
-  <div class="title">🎬 시나리오 자동 재생</div>
-  <div class="desc">데이터 주입 → 장애 구간 조회 → 선형 vs 인덱스 비교 3단계를 순차 실행합니다.</div>
-  <div class="step-dots" id="auto-play-dots">
-    <span class="dot" data-step="1" title="01 데이터 주입"></span>
-    <span class="dot" data-step="2" title="02 장애 구간 조회"></span>
-    <span class="dot" data-step="3" title="03 비교"></span>
-  </div>
-  <button class="btn btn-red" id="btn-autoplay" style="padding:10px 20px">▶ 자동 재생</button>
-</div>
 
 <!-- ═══ 01 · INJECT — white bg ═══ -->
 <section class="section-white">

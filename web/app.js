@@ -687,86 +687,7 @@ function countLeaves(t) {
   return t.children.reduce((s, c) => s + countLeaves(c), 0);
 }
 
-/* ── 5) 시나리오 자동 재생 (δ) ─────────────────────────────── */
-
-const autoPlayDot = (step, cls) => {
-  const dots = document.querySelectorAll("#auto-play-dots .dot");
-  dots.forEach(d => {
-    const s = parseInt(d.dataset.step);
-    d.classList.toggle("is-active", s === step && cls === "active");
-    if (s < step) d.classList.add("is-done");
-    if (step === 0) { d.classList.remove("is-done"); d.classList.remove("is-active"); }
-  });
-};
-
-$("#btn-autoplay").addEventListener("click", async () => {
-  const btn = $("#btn-autoplay");
-  btn.disabled = true;
-  btn.innerHTML = `<span class="btn-loading">재생 중<span class="spinner"></span></span>`;
-  log("▶ 시나리오 자동 재생 시작");
-
-  const scrollTo = (sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-  const wait = (ms) => new Promise(r => setTimeout(r, ms));
-
-  try {
-    // 1) 데이터 주입
-    autoPlayDot(1, "active");
-    scrollTo("#inject-count");
-    await wait(600);
-    $("#btn-inject").click();
-    // inject 완료까지 대기 (버튼이 다시 활성화되는 것을 polling)
-    await waitButtonReady("#btn-inject");
-    autoPlayDot(2, "done");
-
-    await wait(500);
-
-    // 2) 장애 구간 조회
-    autoPlayDot(2, "active");
-    scrollTo("#range-lo");
-    await wait(600);
-    $("#btn-range").click();
-    await waitButtonReady("#btn-range");
-    autoPlayDot(3, "done");
-
-    await wait(600);
-
-    // 3) 비교
-    autoPlayDot(3, "active");
-    scrollTo("#btn-compare");
-    await wait(600);
-    $("#btn-compare").click();
-    await waitButtonReady("#btn-compare");
-
-    log("✓ 시나리오 자동 재생 완료");
-  } catch (e) {
-    log(`자동 재생 중단: ${e.message}`);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "▶ 자동 재생";
-    setTimeout(() => autoPlayDot(0), 2000);
-  }
-});
-
-function waitButtonReady(sel, maxWait = 300000) {
-  return new Promise((resolve, reject) => {
-    const start = performance.now();
-    const id = setInterval(() => {
-      const el = document.querySelector(sel);
-      if (el && !el.disabled) {
-        clearInterval(id);
-        resolve();
-      } else if (performance.now() - start > maxWait) {
-        clearInterval(id);
-        reject(new Error("타임아웃"));
-      }
-    }, 300);
-  });
-}
-
-/* ── 6) Tree SVG 줌 / 팬 / 카메라 이동 ─────────────────────── */
+/* ── 5) Tree SVG 줌 / 팬 / 카메라 이동 ─────────────────────── */
 
 const _zoom = { s: 1, tx: 0, ty: 0 };
 
@@ -832,9 +753,10 @@ function panToTreeNode(nodeEl) {
   _zoom.ty = vb.height / 2 - cy * targetScale;
   const root = _treeRoot();
   if (root) {
-    root.style.transition = "transform 320ms cubic-bezier(.25,.1,.25,1)";
+    /* 노드 펄스 하이라이트(1.6s)와 호흡을 맞추기 위해 ~900ms ease-in-out 으로 천천히 */
+    root.style.transition = "transform 900ms cubic-bezier(.4,.0,.2,1)";
     applyTreeTransform();
-    setTimeout(() => { root.style.transition = ""; }, 360);
+    setTimeout(() => { root.style.transition = ""; }, 950);
   }
 }
 
