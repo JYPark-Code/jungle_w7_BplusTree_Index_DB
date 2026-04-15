@@ -1,19 +1,19 @@
-/* benchmark.c — B+ Tree INSERT / SELECT 성능 측정 (규태 담당).
+/* benchmark.c — B+ Tree 성능 측정 (규태 담당, 지용 레이아웃 개편).
  *
  * 사용법:  make bench
  *
  * 측정 항목:
- *   1. N 건 순차 INSERT 소요 시간
- *   2. N 건 랜덤 키 point-search (bptree_search) 소요 시간
- *   3. 범위 검색 (bptree_range) 소요 시간
- *   4. 선형 vs B+ 트리 인덱스 비교
+ *   1. N 건 순차 INSERT
+ *   2. N 건 랜덤 키 point-search
+ *   3. 범위 검색 (bptree_range)
+ *   4. 선형 vs B+ 트리 인덱스 비교 (자료구조 순수 레벨)
  *
  * 기본 N = 1,000,000. 환경변수 BENCH_N, BENCH_ORDER, BENCH_SEED,
- * BENCH_COMPARE_M 으로 변경 가능.
+ *                       BENCH_COMPARE_M 으로 변경 가능.
  *
  * SQL 레벨 수치 주입 (웹 UI /api/compare 에서 얻은 값):
- *   BENCH_SQL_INDEX_MS, BENCH_SQL_LINEAR_MS  → 3-col 레이아웃의 ① 카드에 표시.
- *   미설정 시 ① 카드는 안내 문구로 대체.
+ *   BENCH_SQL_INDEX_MS, BENCH_SQL_LINEAR_MS
+ *   ① 카드에 함께 렌더. 미주입 시 안내 문구.
  */
 
 #include "bptree.h"
@@ -34,15 +34,8 @@
 #define C_RED     "\033[31m"
 #define C_WHITE   "\033[37m"
 #define C_BRED    "\033[1;31m"
-#define C_BWHITE  "\033[1;37m"
 
 /* ═══ 측정 유틸 ═══════════════════════════════════════════════ */
-
-static double now_sec(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec * 1e-9;
-}
 
 static void shuffle(int *arr, int n) {
     for (int i = n - 1; i > 0; i--) {
@@ -68,28 +61,33 @@ typedef struct {
     int    n, order;
     unsigned seed;
 
-    double insert_sec;
+    double insert_ms;
     int    verify_ok;
 
-    double search_sec;
+    double search_ms;
     int    search_found;
 
-    double range_sec;
+    double range_ms;
     int    range_queries;
     int    range_found;
 
-    /* 선형 vs 인덱스 (in-memory) */
-    double linear_sec;
-    double index_sec;
+    /* 선형 vs 인덱스 (in-memory, ms 단위 기록) */
+    double linear_ms;
+    double index_ms;
     int    linear_hits;
     int    index_hits;
     int    compare_m;
 } Metrics;
 
+static double clock_ms(clock_t t0, clock_t t1) {
+    return (double)(t1 - t0) / (double)CLOCKS_PER_SEC * 1000.0;
+}
+
 static void do_insert(BPTree *t, const int *keys, Metrics *m) {
-    double t0 = now_sec();
+    clock_t t0 = clock();
     for (int i = 0; i < m->n; i++) bptree_insert(t, keys[i], i);
-    m->insert_sec = now_sec() - t0;
+    clock_t t1 = clock();
+    m->insert_ms = clock_ms(t0, t1);
 }
 
 static void do_verify(BPTree *t, const int *keys, Metrics *m) {
@@ -102,11 +100,13 @@ static void do_verify(BPTree *t, const int *keys, Metrics *m) {
 
 static void do_search(BPTree *t, const int *keys, Metrics *m) {
     int found = 0;
-    double t0 = now_sec();
+    clock_t t0 = clock();
     for (int i = 0; i < m->n; i++) {
-        if (bptree_search(t, keys[i]) >= 0) found++;
+        volatile int r = bptree_search(t, keys[i]);  /* 최적화 방지 */
+        if (r >= 0) found++;
     }
-    m->search_sec = now_sec() - t0;
+    clock_t t1 = clock();
+    m->search_ms = clock_ms(t0, t1);
     m->search_found = found;
 }
 
@@ -115,19 +115,24 @@ static void do_range(BPTree *t, Metrics *m) {
     int *buf = malloc(sizeof(int) * (size_t)buf_size);
     int queries = 1000;
     int total_found = 0;
-    double t0 = now_sec();
+    clock_t t0 = clock();
     for (int q = 0; q < queries; q++) {
         int lo = rand() % m->n + 1;
         int hi = lo + 99;
         if (hi > m->n) hi = m->n;
         total_found += bptree_range(t, lo, hi, buf, buf_size);
     }
-    m->range_sec = now_sec() - t0;
+    clock_t t1 = clock();
+    m->range_ms = clock_ms(t0, t1);
     m->range_queries = queries;
     m->range_found = total_found;
     free(buf);
 }
 
+/* 선형 flat array vs B+ tree — volatile 로 최적화 제거.
+ * 버그 1 수정: 이전엔 clock_gettime 을 사용했으나 컴파일러/플랫폼에 따라
+ * 결과 변수가 스코프 밖으로 새는 인상이 있었다. clock() 단일 경로로 통일
+ * 하고 결과를 volatile 로 받아 분명히 소비. */
 static void do_compare(BPTree *t, const int *keys, Metrics *m) {
     int cm = 1000;
     const char *env = getenv("BENCH_COMPARE_M");
@@ -139,18 +144,29 @@ static void do_compare(BPTree *t, const int *keys, Metrics *m) {
     for (int i = 0; i < m->n; i++) flat_ids[i] = keys[i];
     for (int i = 0; i < cm; i++) probes[i] = keys[rand() % m->n];
 
+    /* (1) 선형 */
     int lh = 0;
-    double t0 = now_sec();
+    clock_t t0 = clock();
     for (int q = 0; q < cm; q++) {
         int target = probes[q];
-        for (int i = 0; i < m->n; i++) if (flat_ids[i] == target) { lh++; break; }
+        volatile int found_at = -1;
+        for (int i = 0; i < m->n; i++) {
+            if (flat_ids[i] == target) { found_at = i; break; }
+        }
+        if (found_at >= 0) lh++;
     }
-    m->linear_sec = now_sec() - t0;
+    clock_t t1 = clock();
+    m->linear_ms = clock_ms(t0, t1);
 
+    /* (2) B+ 트리 */
     int ih = 0;
-    t0 = now_sec();
-    for (int q = 0; q < cm; q++) if (bptree_search(t, probes[q]) >= 0) ih++;
-    m->index_sec = now_sec() - t0;
+    t0 = clock();
+    for (int q = 0; q < cm; q++) {
+        volatile int r = bptree_search(t, probes[q]);
+        if (r >= 0) ih++;
+    }
+    t1 = clock();
+    m->index_ms = clock_ms(t0, t1);
 
     m->linear_hits = lh;
     m->index_hits  = ih;
@@ -158,21 +174,33 @@ static void do_compare(BPTree *t, const int *keys, Metrics *m) {
     free(flat_ids); free(probes);
 }
 
-/* ═══ 3-col 터미널 레이아웃 ══════════════════════════════════ */
+/* ═══ 3-col 레이아웃 ═══════════════════════════════════════════ */
 
-/* 실제 터미널 너비 (ANSI/CJK 고려). isatty 아니면 120. */
+#define MAX_LINES 64
+#define MAX_LINE_BYTES 512
+static char g_col[3][MAX_LINES][MAX_LINE_BYTES];
+static int  g_lines[3] = {0, 0, 0};
+
+static void add_line(int c, const char *fmt, ...) {
+    if (g_lines[c] >= MAX_LINES) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g_col[c][g_lines[c]], MAX_LINE_BYTES, fmt, ap);
+    va_end(ap);
+    g_lines[c]++;
+}
+
 static int get_term_width(void) {
     struct winsize ws;
     if (isatty(STDOUT_FILENO) &&
         ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 &&
-        ws.ws_col > 40) {
+        ws.ws_col > 60) {
         return ws.ws_col;
     }
     return 120;
 }
 
-/* UTF-8 + ANSI 를 제외한 화면 표시 너비 계산.
- * ASCII 1, 2-byte UTF-8 1, 3/4-byte (대개 CJK/이모지) 2 로 간주. */
+/* UTF-8 + ANSI 제외한 실제 화면 표시 너비. */
 static int visible_width(const char *s) {
     int w = 0;
     const unsigned char *p = (const unsigned char *)s;
@@ -192,185 +220,158 @@ static int visible_width(const char *s) {
     return w;
 }
 
-typedef struct {
-    char **lines;
-    int    count, cap;
-    int    width;
-} Col;
-
-static void col_init(Col *c, int width) {
-    c->lines = NULL; c->count = 0; c->cap = 0; c->width = width;
+static void print_padded(const char *s, int width) {
+    fputs(s, stdout);
+    int vw = visible_width(s);
+    for (int i = vw; i < width; i++) putchar(' ');
 }
 
-static void col_push(Col *c, const char *s) {
-    if (c->count >= c->cap) {
-        c->cap = c->cap ? c->cap * 2 : 16;
-        c->lines = realloc(c->lines, sizeof(char *) * (size_t)c->cap);
+/* col_w 내에서 n 개 \u2588 를 색과 함께 문자열로 만들기.
+ * %.*s 는 byte 기준이라 UTF-8 멀티바이트에서 깨지므로 직접 반복. */
+static void make_bar(char *dst, size_t dstsz, const char *color, int n, const char *suffix_dim) {
+    int off = 0;
+    off += snprintf(dst + off, dstsz - (size_t)off, "%s", color);
+    for (int i = 0; i < n && off + 4 < (int)dstsz; i++) {
+        off += snprintf(dst + off, dstsz - (size_t)off, "\u2588");
     }
-    c->lines[c->count++] = strdup(s);
+    off += snprintf(dst + off, dstsz - (size_t)off, "%s", C_RESET);
+    if (suffix_dim) {
+        off += snprintf(dst + off, dstsz - (size_t)off, "%s%s%s",
+                         C_DIM, suffix_dim, C_RESET);
+    }
+    dst[dstsz - 1] = '\0';
 }
 
-static void col_pushf(Col *c, const char *fmt, ...) {
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    col_push(c, buf);
+static int compute_bar_len(double value, double max_v, int bar_max) {
+    if (max_v <= 0 || bar_max < 1) return 0;
+    int n = (int)(value / max_v * bar_max);
+    if (n < 1 && value > 0) n = 1;
+    if (n > bar_max) n = bar_max;
+    return n;
 }
 
-/* 긴 텍스트를 col.width 에 맞춰 문자 단위로 wrap. ANSI escape 는 보존. */
-static void col_pushwrap(Col *c, const char *text) {
-    const char *p = text;
-    int width = c->width;
-    if (width < 10) width = 10;
-    while (*p) {
-        char line[2048];
-        int llen = 0, lw = 0;
-        while (*p && lw < width && llen < (int)sizeof(line) - 8) {
-            unsigned char b = (unsigned char)*p;
-            if (b == 0x1b) {
-                while (*p && *p != 'm' && llen < (int)sizeof(line) - 2) line[llen++] = *p++;
-                if (*p == 'm') line[llen++] = *p++;
-                continue;
-            }
-            int bytes, cw;
-            if (b < 0x80)                 { bytes = 1; cw = 1; }
-            else if ((b & 0xE0) == 0xC0)  { bytes = 2; cw = 1; }
-            else if ((b & 0xF0) == 0xE0)  { bytes = 3; cw = 2; }
-            else                           { bytes = 4; cw = 2; }
-            if (lw + cw > width) break;
-            for (int i = 0; i < bytes && *p; i++) line[llen++] = *p++;
-            lw += cw;
+/* ═══ 카드 빌더 ═══════════════════════════════════════════════ */
+
+static void build_sql_card(int col, int col_w,
+                            double sql_idx_ms, double sql_lin_ms,
+                            int near_zero) {
+    int bar_max = col_w - 14;
+    if (bar_max < 10) bar_max = 10;
+
+    add_line(col, C_BOLD "\u2460 SQL END-TO-END" C_RESET);
+    add_line(col, C_DIM "/api/compare \u00B7 subprocess" C_RESET);
+    add_line(col, C_DIM "ensure_index rebuild 포함" C_RESET);
+    add_line(col, "");
+
+    if (sql_idx_ms > 0 && sql_lin_ms > 0) {
+        double ratio = sql_lin_ms / sql_idx_ms;
+        int blin = compute_bar_len(sql_lin_ms, sql_lin_ms, bar_max);
+        int bidx = compute_bar_len(sql_idx_ms, sql_lin_ms, bar_max);
+        char bar1[512], bar2[512];
+        char buf1[64], buf2[64];
+        snprintf(buf1, sizeof(buf1), "  %.1fms", sql_lin_ms);
+        snprintf(buf2, sizeof(buf2), "  %.1fms", sql_idx_ms);
+        make_bar(bar1, sizeof(bar1), C_RED,   blin, buf1);
+        make_bar(bar2, sizeof(bar2), C_WHITE, bidx, buf2);
+
+        add_line(col, "  " C_RED "선형 (status)" C_RESET);
+        add_line(col, "  %s", bar1);
+        add_line(col, "  " C_WHITE "인덱스 (BETWEEN)" C_RESET);
+        add_line(col, "  %s", bar2);
+        add_line(col, "");
+        if (near_zero) {
+            add_line(col, "  " C_BRED "측정불가 (< 1\u03BCs)" C_RESET);
+        } else {
+            add_line(col, "  " C_BRED "%.1f\u00D7" C_RESET " 단축", ratio);
         }
-        line[llen] = '\0';
-        col_push(c, line);
-        /* 다음 줄 선두 공백 제거 */
-        while (*p == ' ') p++;
+        add_line(col, "  " C_DIM "인덱스 %.2fms \u00B7 선형 %.2fms" C_RESET,
+                 sql_idx_ms, sql_lin_ms);
+    } else {
+        add_line(col, "  " C_DIM "(측정 값 미주입)" C_RESET);
+        add_line(col, "");
+        add_line(col, "  " C_REV " BENCH_SQL_INDEX_MS " C_RESET);
+        add_line(col, "  " C_REV " BENCH_SQL_LINEAR_MS " C_RESET);
+        add_line(col, "  " C_DIM "환경변수로 주입하거나" C_RESET);
+        add_line(col, "  " C_DIM "웹 UI /api/compare" C_RESET);
+        add_line(col, "  " C_DIM "결과를 복사해서 사용." C_RESET);
     }
 }
 
-/* 막대 차트 한 쌍 (라벨 줄 + 바 줄). max_v 에 비례해 col_w - 24 의 █. */
-static void col_bar(Col *c, const char *label, double value, double max_v,
-                    const char *color) {
-    int max_bar = c->width - 22;
-    if (max_bar < 8) max_bar = 8;
-    int len = (max_v > 0) ? (int)(value / max_v * max_bar) : 0;
-    if (len < 1 && value > 0) len = 1;
-    if (len > max_bar) len = max_bar;
+static void build_bench_card(int col, int col_w, const Metrics *m) {
+    int bar_max = col_w - 14;
+    if (bar_max < 10) bar_max = 10;
 
-    col_pushf(c, "  %s", label);
+    add_line(col, C_BOLD "\u2461 자료구조 순수" C_RESET);
+    add_line(col, C_DIM "make bench \u00B7 bptree_search" C_RESET);
+    add_line(col, C_DIM "인-프로세스 호출만" C_RESET);
+    add_line(col, "");
 
-    char line[2048];
-    int n = 0;
-    n += snprintf(line + n, sizeof(line) - (size_t)n, "  %s", color);
-    for (int i = 0; i < len; i++)
-        n += snprintf(line + n, sizeof(line) - (size_t)n, "\u2588");
-    n += snprintf(line + n, sizeof(line) - (size_t)n, "%s", C_RESET);
+    /* M 회 평균 query 당 시간 (per_query) */
+    double per_index = m->compare_m > 0 ? m->index_ms  / m->compare_m : 0.0;
+    double per_linear = m->compare_m > 0 ? m->linear_ms / m->compare_m : 0.0;
+    int near_zero = (m->index_ms < 0.001);  /* 0.001 ms 미만 = 1μs 미만 */
 
-    char valbuf[64];
-    if (value >= 0.01)
-        snprintf(valbuf, sizeof(valbuf), "  %.3fs", value);
-    else
-        snprintf(valbuf, sizeof(valbuf), "  %.2fms", value * 1000.0);
-    snprintf(line + n, sizeof(line) - (size_t)n, "%s%s%s", C_DIM, valbuf, C_RESET);
-    col_push(c, line);
-}
+    int blin = compute_bar_len(m->linear_ms, m->linear_ms, bar_max);
+    int bidx = compute_bar_len(m->index_ms,  m->linear_ms, bar_max);
 
-static void col_free(Col *c) {
-    for (int i = 0; i < c->count; i++) free(c->lines[i]);
-    free(c->lines);
-}
+    char bar1[512], bar2[512];
+    char buf1[64], buf2[64];
+    snprintf(buf1, sizeof(buf1), "  %.2fms", m->linear_ms);
+    snprintf(buf2, sizeof(buf2), near_zero ? "  < 0.01ms" : "  %.2fms", m->index_ms);
+    make_bar(bar1, sizeof(bar1), C_RED,   blin, buf1);
+    make_bar(bar2, sizeof(bar2), C_WHITE, bidx, buf2);
 
-static void col_print_line(const Col *c, int idx) {
-    const char *line = (idx < c->count) ? c->lines[idx] : "";
-    int vw = visible_width(line);
-    fputs(line, stdout);
-    for (int i = vw; i < c->width; i++) putchar(' ');
-}
+    add_line(col, "  " C_RED "선형 flat array" C_RESET);
+    add_line(col, "  %s", bar1);
+    add_line(col, "  " C_WHITE "bptree_search" C_RESET);
+    add_line(col, "  %s", bar2);
+    add_line(col, "");
 
-static void hr(int total_w, char ch) {
-    for (int i = 0; i < total_w; i++) {
-        if (ch == '-')  fputs("\u2500", stdout);
-        else if (ch == '=') fputs("\u2501", stdout);
-        else putchar(ch);
+    if (near_zero) {
+        add_line(col, "  " C_BRED "측정불가 (< 1\u03BCs)" C_RESET);
+        add_line(col, "  " C_DIM "M=%d 회는 index 가 너무 빨라 clock() 해상도 미만."
+                 C_RESET, m->compare_m);
+    } else {
+        double ratio = m->linear_ms / m->index_ms;
+        add_line(col, "  " C_BRED "%.0f\u00D7" C_RESET " 단축", ratio);
     }
+    add_line(col, "  " C_DIM "per query: %.4fms \u00B7 %.4fms" C_RESET,
+             per_index, per_linear);
+    add_line(col, "  " C_DIM "N=%d \u00B7 M=%d" C_RESET, m->n, m->compare_m);
+}
+
+static void build_why_card(int col) {
+    add_line(col, C_BRED "\u2462 두 배율이 다른 이유" C_RESET);
+    add_line(col, C_DIM "\u2460 에 포함된 고정비:" C_RESET);
+    add_line(col, "");
+    add_line(col, "\u2022 " C_REV " subprocess " C_RESET);
+    add_line(col, "  fork + exec");
+    add_line(col, "\u2022 " C_REV " SQL 파싱 " C_RESET);
+    add_line(col, "  tokenize + AST");
+    add_line(col, "\u2022 " C_REV " ensure_index rebuild " C_RESET);
+    add_line(col, "  ~1.8s / call");
+    add_line(col, "\u2022 " C_REV " 파일 I/O " C_RESET);
+    add_line(col, "  CSV / BIN 읽기");
+    add_line(col, "");
+    add_line(col, C_DIM "PostgreSQL 같은" C_RESET);
+    add_line(col, C_DIM "영속 데몬이면" C_RESET);
+    add_line(col, C_DIM "rebuild 가 사라져" C_RESET);
+    add_line(col, C_DIM "\u2460 이 \u2461 에 수렴." C_RESET);
+}
+
+/* ═══ 출력 ═══════════════════════════════════════════════════ */
+
+static void hr(int total_w, int heavy) {
+    for (int i = 0; i < total_w; i++) fputs(heavy ? "\u2501" : "\u2500", stdout);
     putchar('\n');
 }
 
-static void print_centered_bold(int total_w, const char *s) {
+static void print_centered(int total_w, const char *s, const char *color) {
     int w = visible_width(s);
     int pad = (total_w - w) / 2;
     if (pad < 0) pad = 0;
     for (int i = 0; i < pad; i++) putchar(' ');
-    printf(C_BOLD "%s" C_RESET "\n", s);
-}
-
-static void print_centered_dim(int total_w, const char *s) {
-    int w = visible_width(s);
-    int pad = (total_w - w) / 2;
-    if (pad < 0) pad = 0;
-    for (int i = 0; i < pad; i++) putchar(' ');
-    printf(C_DIM "%s" C_RESET "\n", s);
-}
-
-/* ═══ 카드 컨텐츠 빌더 ═══════════════════════════════════════ */
-
-static void build_col_sql(Col *c, const Metrics *m,
-                          double sql_index_ms, double sql_linear_ms) {
-    col_push(c, C_BOLD "\u2460 SQL END-TO-END" C_RESET);
-    col_pushwrap(c, C_DIM "subprocess + SQL 파싱 + ensure_index rebuild + 파일 I/O 포함. 웹 /api/compare 와 동일 경로." C_RESET);
-    col_push(c, "");
-
-    if (sql_index_ms > 0 && sql_linear_ms > 0) {
-        double maxv = sql_linear_ms / 1000.0;
-        col_bar(c, C_RED "선형 (status)" C_RESET,
-                sql_linear_ms / 1000.0, maxv, C_RED);
-        col_bar(c, C_WHITE "인덱스 (BETWEEN)" C_RESET,
-                sql_index_ms / 1000.0, maxv, C_WHITE);
-        col_push(c, "");
-        double sp = sql_linear_ms / sql_index_ms;
-        col_pushf(c, "  " C_BRED "%.1f\u00D7" C_RESET " 단축", sp);
-        col_pushf(c, "  " C_DIM "인덱스 %.0fms \u00B7 선형 %.0fms" C_RESET,
-                  sql_index_ms, sql_linear_ms);
-    } else {
-        col_push(c, "  " C_DIM "(측정 값 미주입)" C_RESET);
-        col_push(c, "");
-        col_pushwrap(c, C_DIM "환경변수 " C_RESET C_REV " BENCH_SQL_INDEX_MS " C_RESET
-                       C_DIM " 과 " C_RESET C_REV " BENCH_SQL_LINEAR_MS " C_RESET
-                       C_DIM " 로 주입하세요." C_RESET);
-        col_push(c, "");
-        col_pushwrap(c, C_DIM "또는 웹 UI /api/compare 결과의 index_ms / linear_ms 를 그대로 복사." C_RESET);
-    }
-    (void)m;
-}
-
-static void build_col_bench(Col *c, const Metrics *m) {
-    col_push(c, C_BOLD "\u2461 자료구조 순수" C_RESET);
-    col_pushwrap(c, C_DIM "bptree_search 인-프로세스 호출만. subprocess / 파일 / SQL 파싱 없음." C_RESET);
-    col_push(c, "");
-
-    double maxv = m->linear_sec;
-    col_bar(c, C_RED "선형 flat array" C_RESET, m->linear_sec, maxv, C_RED);
-    col_bar(c, C_WHITE "bptree_search" C_RESET,  m->index_sec,  maxv, C_WHITE);
-    col_push(c, "");
-    double sp = (m->index_sec > 0) ? m->linear_sec / m->index_sec : 0;
-    col_pushf(c, "  " C_BRED "%.0f\u00D7" C_RESET " 단축", sp);
-    col_pushf(c, "  " C_DIM "인덱스 %.3fs \u00B7 선형 %.3fs" C_RESET,
-              m->index_sec, m->linear_sec);
-    col_pushf(c, "  " C_DIM "N=%d \u00B7 M=%d" C_RESET, m->n, m->compare_m);
-}
-
-static void build_col_why(Col *c) {
-    col_push(c, C_BRED "\u2462 두 배율이 다른 이유" C_RESET);
-    col_pushwrap(c, C_DIM "\u2460 에는 \u2461 에 없는 고정비가 포함됩니다:" C_RESET);
-    col_push(c, "");
-    col_pushwrap(c, "\u2022 " C_REV " subprocess " C_RESET "  fork + exec");
-    col_pushwrap(c, "\u2022 " C_REV " SQL 파싱 " C_RESET "  tokenize + AST");
-    col_pushwrap(c, "\u2022 " C_REV " ensure_index rebuild " C_RESET "  ~1.8s / call");
-    col_pushwrap(c, "\u2022 " C_REV " 파일 I/O " C_RESET "  CSV / BIN 읽기");
-    col_push(c, "");
-    col_pushwrap(c, C_DIM "PostgreSQL 같은 영속 데몬이면 rebuild 가 사라져 \u2460 이 \u2461 에 수렴." C_RESET);
+    printf("%s%s%s\n", color, s, C_RESET);
 }
 
 /* ═══ main ═══════════════════════════════════════════════════ */
@@ -395,7 +396,7 @@ int main(void) {
     BPTree *tree = bptree_create(m.order);
     if (!tree) { fprintf(stderr, "[bench] bptree_create failed\n"); free(keys); return 1; }
 
-    /* 측정 — 기존 로직 그대로 */
+    /* 측정 — 기존 로직 그대로 (bptree_*, clock) */
     do_insert(tree, keys, &m);
     do_verify(tree, keys, &m);
     shuffle(keys, m.n);
@@ -403,62 +404,57 @@ int main(void) {
     do_range(tree, &m);
     do_compare(tree, keys, &m);
 
-    /* 터미널 레이아웃 */
-    int tw = get_term_width();
-    if (tw < 80) tw = 80;
-    if (tw > 200) tw = 200;  /* 너무 넓으면 읽기 부담 */
+    /* 터미널 너비 + 3-col 분할 */
+    int term_w = get_term_width();
+    if (term_w < 80) term_w = 80;
+    int col_w = (term_w - 4) / 3;  /* " │ " 2개 = 6바이트, 표시폭 4 */
+    if (col_w < 26) col_w = 26;
 
+    /* SQL 주입값 */
     const char *env_sql_idx = getenv("BENCH_SQL_INDEX_MS");
     const char *env_sql_lin = getenv("BENCH_SQL_LINEAR_MS");
     double sql_idx = env_sql_idx ? atof(env_sql_idx) : 0;
     double sql_lin = env_sql_lin ? atof(env_sql_lin) : 0;
 
     /* ═══ 헤더 ═══ */
-    hr(tw, '=');
-    print_centered_bold(tw, "B+ TREE BENCHMARK  \u00B7  선형 vs 인덱스");
+    hr(term_w, 1);
+    print_centered(term_w, "B+ TREE BENCHMARK  \u00B7  선형 vs 인덱스", C_BOLD);
     {
         char sub[256];
         snprintf(sub, sizeof(sub),
                  "N=%d  \u00B7  order=%d  \u00B7  compare M=%d  \u00B7  seed=%u",
                  m.n, m.order, m.compare_m, m.seed);
-        print_centered_dim(tw, sub);
+        print_centered(term_w, sub, C_DIM);
     }
-    hr(tw, '-');
+    hr(term_w, 0);
 
-    /* ═══ 3-col 영역 ═══ */
-    int gap = 3;  /* " \u2502 " = 공백 + 선 + 공백 (화면 3칸) */
-    int col_w = (tw - 2 * gap) / 3;
-    if (col_w < 24) col_w = 24;
+    /* 카드 내용 채우기 */
+    build_sql_card(0, col_w, sql_idx, sql_lin, 0);
+    build_bench_card(1, col_w, &m);
+    build_why_card(2);
 
-    Col c1, c2, c3;
-    col_init(&c1, col_w);
-    col_init(&c2, col_w);
-    col_init(&c3, col_w);
+    int max_lines = g_lines[0];
+    if (g_lines[1] > max_lines) max_lines = g_lines[1];
+    if (g_lines[2] > max_lines) max_lines = g_lines[2];
 
-    build_col_sql(&c1, &m, sql_idx, sql_lin);
-    build_col_bench(&c2, &m);
-    build_col_why(&c3);
-
-    int rows = c1.count;
-    if (c2.count > rows) rows = c2.count;
-    if (c3.count > rows) rows = c3.count;
-
-    for (int r = 0; r < rows; r++) {
-        col_print_line(&c1, r);
+    /* 병렬 출력 — %-*s 는 byte 단위라 CJK/ANSI 에서 오정렬.
+     * print_padded 가 visible_width 기반으로 공백 패딩해 정확히 맞춤. */
+    for (int i = 0; i < max_lines; i++) {
+        print_padded(i < g_lines[0] ? g_col[0][i] : "", col_w);
         printf(" " C_DIM "\u2502" C_RESET " ");
-        col_print_line(&c2, r);
+        print_padded(i < g_lines[1] ? g_col[1][i] : "", col_w);
         printf(" " C_DIM "\u2502" C_RESET " ");
-        col_print_line(&c3, r);
+        print_padded(i < g_lines[2] ? g_col[2][i] : "", col_w);
         putchar('\n');
     }
 
-    hr(tw, '-');
+    hr(term_w, 0);
 
-    /* ═══ 총평 (단일 행) ═══ */
+    /* 푸터 한 줄 — INSERT / SEARCH / RANGE / VERIFY */
     {
-        double insert_ops = m.insert_sec > 0 ? m.n / m.insert_sec : 0;
-        double search_ops = m.search_sec > 0 ? m.n / m.search_sec : 0;
-        double range_qps  = m.range_sec  > 0 ? m.range_queries / m.range_sec : 0;
+        double insert_ops = m.insert_ms > 0 ? m.n / (m.insert_ms / 1000.0) : 0;
+        double search_ops = m.search_ms > 0 ? m.n / (m.search_ms / 1000.0) : 0;
+        double range_qps  = m.range_ms  > 0 ? m.range_queries / (m.range_ms / 1000.0) : 0;
 
         char line[512];
         snprintf(line, sizeof(line),
@@ -470,15 +466,14 @@ int main(void) {
                  C_WHITE, search_ops / 1e6,
                  C_WHITE, range_qps / 1e6,
                  m.verify_ok, m.n);
-        int pad = (tw - visible_width(line)) / 2;
+        int pad = (term_w - visible_width(line)) / 2;
         if (pad < 0) pad = 0;
         for (int i = 0; i < pad; i++) putchar(' ');
         fputs(line, stdout);
         putchar('\n');
     }
-    hr(tw, '=');
+    hr(term_w, 1);
 
-    col_free(&c1); col_free(&c2); col_free(&c3);
     bptree_destroy(tree);
     free(keys);
     return 0;
