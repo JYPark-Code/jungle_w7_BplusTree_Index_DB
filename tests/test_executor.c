@@ -428,6 +428,51 @@ static int test_execute_select_where_id_uses_bptree_path(void)
     return 0;
 }
 
+static int test_execute_select_where_id_count_star(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 1;
+    sql->columns = (char **)calloc(1U, sizeof(char *));
+    sql->columns[0] = duplicate_string("COUNT(*)");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "3");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture indexed COUNT(*) output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "COUNT(*)") ||
+        !contains_text(output, "\n1\n") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Indexed COUNT(*) output was not correct.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
 static int test_execute_select_where_id_without_registry_falls_back(void)
 {
     ParsedSQL *sql;
@@ -592,6 +637,11 @@ int run_executor_tests(void)
     }
 
     if (test_execute_select_where_id_uses_bptree_path() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_count_star() != 0) {
         status = 1;
         goto cleanup;
     }
