@@ -104,10 +104,34 @@ void bptree_insert(BPTree *tree, int id, int row_index) {
     /* Phase 3 에서 구현. */
 }
 
+/* 내부 노드에서 id 키가 속할 자식 인덱스 반환.
+ *
+ * 규약: keys[i-1] <= id < keys[i] 인 i 를 찾아 children[i] 로 내려간다.
+ *   - id < keys[0]              → 0
+ *   - keys[i-1] <= id < keys[i] → i
+ *   - id >= keys[num_keys-1]    → num_keys
+ * 선형 스캔으로 구현. 차수가 크지 않을 때 이진 탐색보다 오버헤드 작음. */
+static int internal_child_idx(const Node *n, int id) {
+    assert(!n->is_leaf);
+    int i = 0;
+    while (i < n->num_keys && id >= n->keys[i]) {
+        ++i;
+    }
+    return i;
+}
+
 int bptree_search(BPTree *tree, int id) {
-    (void)tree;
-    (void)id;
-    return -1; /* Phase 2 하위 커밋에서 구현. */
+    if (!tree || !tree->root) return -1;
+    Node *cur = tree->root;
+    while (!cur->is_leaf) {
+        cur = cur->u.internal.children[internal_child_idx(cur, id)];
+    }
+    for (int i = 0; i < cur->num_keys; ++i) {
+        if (cur->keys[i] == id) {
+            return cur->u.leaf.row_indices[i];
+        }
+    }
+    return -1;
 }
 
 int bptree_range(BPTree *tree, int from, int to, int *out, int max_out) {
