@@ -20,6 +20,8 @@
 #endif
 
 #include "types.h"
+#include "bptree.h"
+#include "index_registry.h"
 
 /* ANSI 컬러 매크로 (세인 PR #31 일부 채택).
  * print_rowset 의 헤더 행에만 색을 입혀 SELECT 결과 표를 강조한다.
@@ -150,8 +152,13 @@ static int evaluate_aggregate(const char *fn, int col_index, ColumnType type,
                               const StorageRowBuffer *selection, char *out, size_t out_size);
 static int rowset_alloc(RowSet **out, int row_count, int col_count);
 
+/* ─── Week 7: auto-increment id ─────────────────────────────── */
+static int find_max_id_in_csv(const char *table_path, int id_col_index);
+static int count_csv_rows(const char *table_path);
+
 /* 입력: 테이블 이름, optional 컬럼 목록, 값 목록, 값 개수
  * 동작: schema를 읽어 INSERT 값을 schema 순서의 row로 정렬한 뒤 CSV에 append
+ *       id 컬럼이 스키마에 있고 사용자가 값을 안 넣었으면 auto-increment id 부여
  * 반환: 성공 0, 실패 -1 */
 int storage_insert(const char *table, char **columns, char **values, int count)
 {
@@ -161,6 +168,15 @@ int storage_insert(const char *table, char **columns, char **values, int count)
     int schema_count = 0;
     char **row = NULL;
     int status = -1;
+
+    /* auto-id 관련 변수 */
+    int id_col_index = -1;
+    int need_auto_id = 0;
+    int auto_id = 0;
+    char **aug_columns = NULL;
+    char **aug_values = NULL;
+    int aug_count = count;
+    char id_str[32];
 
     if (validate_insert_input(table, values, count) != 0) {
         return -1;
@@ -178,15 +194,110 @@ int storage_insert(const char *table, char **columns, char **values, int count)
         return -1;
     }
 
-    if (build_row_in_schema_order(schema, schema_count, columns, values, count, &row) != 0) {
-        goto cleanup;
+    /* ── auto-id: 스키마에 "id" 컬럼이 있는데 사용자가 안 넣었으면 자동 부여 ── */
+    id_col_index = find_schema_index(schema, schema_count, "id");
+
+    if (id_col_index >= 0 && columns != NULL) {
+        /* columns != NULL 일 때만 auto-id 검사.
+         * columns == NULL 이면 사용자가 모든 값을 스키마 순서대로 넣는 것이므로
+         * id 도 이미 포함되어 있다고 간주. */
+        int user_has_id = 0;
+        {
+            int i;
+            for (i = 0; i < count; ++i) {
+                if (columns[i] && equals_ignore_case(columns[i], "id")) {
+                    user_has_id = 1;
+                    break;
+                }
+            }
+        }
+
+        if (!user_has_id) {
+            int i;
+            int max_id;
+
+            need_auto_id = 1;
+
+            /* CSV 에서 현재 max id 를 읽어 next_id 결정 (캐시 없이 항상 CSV 기준). */
+            max_id = find_max_id_in_csv(table_path, id_col_index);
+            auto_id = max_id + 1;
+            snprintf(id_str, sizeof(id_str), "%d", auto_id);
+
+            /* columns/values 를 확장한 사본 생성 */
+            aug_count = count + 1;
+            aug_columns = calloc((size_t)aug_count, sizeof(*aug_columns));
+            aug_values  = calloc((size_t)aug_count, sizeof(*aug_values));
+            if (!aug_columns || !aug_values) {
+                goto cleanup;
+            }
+
+            aug_columns[0] = dup_string("id");
+            aug_values[0]  = dup_string(id_str);
+            if (!aug_columns[0] || !aug_values[0]) {
+                goto cleanup;
+            }
+
+            for (i = 0; i < count; ++i) {
+                if (columns != NULL) {
+                    aug_columns[i + 1] = dup_string(columns[i]);
+                    if (!aug_columns[i + 1]) goto cleanup;
+                }
+                aug_values[i + 1] = dup_string(values[i]);
+                if (!aug_values[i + 1]) goto cleanup;
+            }
+        }
     }
 
-    status = append_csv_row(table_path, row, schema_count);
+    /* build_row_in_schema_order 에 넘길 인자 결정 */
+    if (need_auto_id) {
+        if (build_row_in_schema_order(schema, schema_count,
+                                      aug_columns, aug_values, aug_count, &row) != 0) {
+            goto cleanup;
+        }
+    } else {
+        if (build_row_in_schema_order(schema, schema_count,
+                                      columns, values, count, &row) != 0) {
+            goto cleanup;
+        }
+    }
+
+    /* row_idx: 현재 CSV 행 수 = 새 행이 저장될 0-based 인덱스 */
+    {
+        int row_idx = count_csv_rows(table_path);
+
+        status = append_csv_row(table_path, row, schema_count);
+
+        /* 성공 시 index_registry 를 통해 B+ 트리에 (id, row_idx) 등록 */
+        if (status == 0 && id_col_index >= 0) {
+            int inserted_id;
+            BPTree *tree;
+
+            if (need_auto_id) {
+                inserted_id = auto_id;
+            } else {
+                /* 사용자가 직접 넣은 id — strtol 로 안전하게 파싱 */
+                char *endptr;
+                long id_long;
+                errno = 0;
+                id_long = strtol(row[id_col_index], &endptr, 10);
+                if (errno != 0 || endptr == row[id_col_index]) {
+                    id_long = 0;
+                }
+                inserted_id = (int)id_long;
+            }
+
+            tree = index_registry_get_or_create(table, 128);
+            if (tree) {
+                bptree_insert(tree, inserted_id, row_idx);
+            }
+        }
+    }
 
 cleanup:
     free_string_array(row, schema_count);
     free(schema);
+    if (aug_columns) free_string_array(aug_columns, aug_count);
+    if (aug_values)  free_string_array(aug_values, aug_count);
     return status;
 }
 
@@ -807,6 +918,64 @@ static int build_row_in_schema_order(const ColDef *schema, int schema_count,
 
     *out_row = row;
     return 0;
+}
+
+/* ─── Week 7: auto-id 헬퍼 ──────────────────────────────────── */
+
+/* CSV 파일에서 id_col_index 번째 컬럼의 최대 정수 값을 반환.
+ * 파일이 비어있거나 열 수 없으면 0 반환 (next_id 가 1 부터 시작). */
+static int find_max_id_in_csv(const char *table_path, int id_col_index)
+{
+    FILE *fp;
+    int max_id = 0;
+    char *record = NULL;
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    while (read_csv_record(fp, &record) == 1) {
+        char **fields = NULL;
+        int field_count = 0;
+
+        if (parse_csv_record(record, &fields, &field_count) == 0) {
+            if (id_col_index < field_count && fields[id_col_index] != NULL) {
+                int val = atoi(fields[id_col_index]);
+                if (val > max_id) {
+                    max_id = val;
+                }
+            }
+            free_string_array(fields, field_count);
+        }
+        free(record);
+        record = NULL;
+    }
+
+    fclose(fp);
+    return max_id;
+}
+
+/* CSV 파일의 행 수를 반환 (row_index 계산용). */
+static int count_csv_rows(const char *table_path)
+{
+    FILE *fp;
+    int count = 0;
+    char *record = NULL;
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) {
+        return 0;
+    }
+
+    while (read_csv_record(fp, &record) == 1) {
+        count++;
+        free(record);
+        record = NULL;
+    }
+
+    fclose(fp);
+    return count;
 }
 
 /* 입력: 테이블 CSV 경로, row 배열, row 길이
