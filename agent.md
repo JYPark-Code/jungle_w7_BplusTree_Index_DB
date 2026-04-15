@@ -192,6 +192,64 @@ Speedup : ~128x
 
 ---
 
+### 규태 (보너스) — web/ 웹 시연 UI
+
+**담당 파일:** `web/index.html`, `web/app.js`, `web/server.py` (전부 신설)
+**브랜치:** `feature/web-demo` (MP4 머지 후 생성)
+**전제:** 본진 벤치마크 PR 머지 완료 후에만 착수.
+
+**작업 내용:**
+- `server.py` — `http.server` stdlib 기반 중개 서버
+  - `GET /` → `web/index.html`, `GET /app.js` → 정적 서빙
+  - `POST /api/query` → body 의 SQL 을 `./sqlparser --json` subprocess 로 실행, stdout 을 JSON 으로 그대로 전달
+  - `POST /api/bench` → `./benchmark` 실행, stdout 파싱해 `{insert_ops, search_ops, range_qps}` JSON 반환
+- `index.html` — SQL 입력 `<textarea>` + 결과 `<table>` + 벤치 `<canvas>` 3영역
+- `app.js` — `fetch('/api/query')`, `fetch('/api/bench')` 호출 + Chart.js CDN 으로 막대그래프
+
+**스택 제약 (의존성 0):**
+- npm / node / webpack 사용 금지
+- Python 도 stdlib 만 (Flask, FastAPI 등 외부 패키지 X)
+- Chart.js 는 CDN `<script>` 태그 한 줄로만
+
+**금지 사항:**
+- `include/*.h`, `src/*.c`, `tests/*.c`, `bench/*.c` 전부 **수정 금지** — 웹 레이어에서만 작업
+- `Makefile` 수정이 필요하면 지용에게 요청
+
+**단위 테스트 (AI 생성 위임):**
+- `server.py` 의 SQL 파싱 / 벤치 stdout 파싱 함수는 `unittest` 로 커버
+- 브라우저 동작은 수동 시나리오 체크리스트로 대체 OK
+
+**완료 기준 (MP5, 선택):**
+- `python3 web/server.py` 로컬 실행 → 브라우저에서 아래 "결제/트랜잭션 로그 시연" 3 시나리오 동작
+- 기존 `make test` / `make bench` 회귀 0
+
+**시연 시나리오 — 결제/트랜잭션 로그 (발표 메인 컨텐츠):**
+
+> 발표용 핵심 멘트: **"장애 발생 시 특정 시간 구간의 트랜잭션 로그를 빠르게 조회해야 한다 — B+Tree range query 가 O(log n + k) 로 해결한다."**
+
+데이터 모델:
+```sql
+CREATE TABLE payments (
+    id INT, user_id INT, amount INT,
+    status TEXT,       -- 'SUCCESS' | 'FAIL' | 'TIMEOUT'
+    created_at INT     -- Unix timestamp
+);
+```
+
+UI 버튼 3개 (최소 구성):
+1. **[ 더미 주입 ]** — 10만~100만 건, 실패율 5% / 타임아웃 2% 섞어서 생성
+2. **[ 장애 구간 조회 (range) ]** — `WHERE id BETWEEN A AND B` 로 특정 시간 구간 로그만 추출, 1ms 내 반환 표시
+3. **[ 선형 vs 인덱스 비교 ]** — 같은 범위를 선형 탐색으로도 돌려서 Chart.js 막대그래프 2개, "400배 단축" 시각화
+
+발표자가 말할 스토리: *"새벽 3시 결제 시스템 장애. 로그에서 3:00~3:15 구간만 빠르게 뽑아야 한다. id 는 시간순 auto-increment 이므로 id 범위 = 시간 구간 proxy 로 사용."*
+
+**JSON 스키마 계약 (FE 깨짐 방지):**
+- 착수 시점의 `./sqlparser --json` 출력 스펙을 `web/README.md` 에 박제
+- 정환/민철 PR 머지 후 스키마 diff 발생 시 FE 파서만 수정
+- 스키마 변경은 정환(executor/json_out 담당) 과 규태(FE 담당) 합의 후에만
+
+---
+
 ## 머지 포인트
 
 | MP | 시점 | 조건 |
@@ -201,6 +259,7 @@ Speedup : ~128x
 | **MP3** | 17:30 | split 완성 + 정환/민철 PR 머지 + 통합 빌드 227+ 통과 |
 | **MP4** | 20:30 | 100만 건 테스트 + valgrind 0 + 규태 PR 머지 |
 | **최종** | 21:00 | dev → main 머지 |
+| **MP5** (선택) | 발표 전 | 규태 `feature/web-demo` PR 머지 — 본진 영향 0 확인 후에만 |
 
 ---
 
@@ -258,6 +317,8 @@ scope 예시: `bptree`, `executor`, `storage`, `bench`, `makefile`
 | `src/executor.c` | 정환 | ❌ |
 | `src/storage.c` | 민철 | ❌ |
 | `bench/benchmark.c` | 규태 | ❌ |
+| `web/` (전체) | 규태 (보너스) | ❌ |
+| `src/json_out.c` | 정환 (출력 스키마 변경 시 규태에 공유) | 🟡 |
 | `include/types.h` | 전원 수정 금지 | ❌ |
 | `Makefile` | 지용 (각자 필요시 PR로 요청) | PR 경유 |
 

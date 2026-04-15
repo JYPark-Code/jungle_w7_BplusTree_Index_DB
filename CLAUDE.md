@@ -15,6 +15,7 @@ Week 6 SQL 처리기에 B+ 트리 인덱스를 추가하는 1일 스프린트.
 | 정환 | `executor.c` WHERE id 분기 + SQL 처리기 이식 검증 | `feature/executor-index` |
 | 민철 | `storage.c` auto-increment id + `bptree_insert` 연동 | `feature/storage-autoid` |
 | 규태 | `bench/benchmark.c` + 더미 데이터 생성기 + README | `feature/benchmark` |
+| 규태 (추가) | `web/` 웹 데모 (정적 HTML + Python stdlib 중개 서버) | `feature/web-demo` |
 
 ---
 
@@ -188,6 +189,10 @@ PR 올리기 전 반드시 확인:
 │   └── test_bptree.c    ← 지용 (AI 생성)
 ├── bench/
 │   └── benchmark.c      ← 규태
+├── web/                 ← 규태 (보너스: 발표 시연용 웹 UI)
+│   ├── index.html       ← SQL 입력창 + 결과 테이블 + Chart.js 벤치 차트
+│   ├── app.js           ← fetch 로 /api/query, /api/bench 호출
+│   └── server.py        ← http.server 기반 중개 (stdlib만, 의존성 0)
 ├── Makefile
 ├── CLAUDE.md            ← 이 파일
 ├── agent.md
@@ -205,3 +210,77 @@ make bench        # 벤치마크
 make valgrind     # 누수 검사
 make clean
 ```
+
+---
+
+## 웹 데모 (규태, 보너스 과제)
+
+발표 시연 임팩트 강화를 위한 선택 과제. **본진 MP4 머지 완료 후**에만 착수.
+
+### 스택 (의존성 0 원칙)
+- 프론트: 정적 HTML + vanilla JS + Chart.js CDN 한 줄
+- 백엔드: `python3 -m http.server` 계열 — `http.server.BaseHTTPRequestHandler` 직접 상속, stdlib만
+- 빌드 파이프라인 없음 (npm / node / webpack X)
+
+### 동작 방식
+1. `server.py` 가 `./sqlparser`, `./benchmark` 를 `subprocess` 로 호출
+2. `POST /api/query` → sqlparser `--json` 모드 실행 → 결과 JSON 반환
+3. `POST /api/bench` → benchmark 실행 → stdout 파싱해 차트용 JSON 반환
+4. 정적 파일(`index.html`, `app.js`)도 같은 포트에서 서빙 → CORS 불필요
+
+### 제약
+- `include/bptree.h`, `include/types.h`, 기존 C 소스 **수정 금지** — 웹 레이어에서만 작업
+- 기존 `make test` / `make bench` 회귀 0 유지
+- `Makefile` 수정 필요 시 지용에게 PR 요청
+
+### 시연 시나리오 — 결제/트랜잭션 로그 (발표 메인)
+
+**발표용 핵심 멘트:**
+> **"장애 발생 시 특정 시간 구간의 트랜잭션 로그를 빠르게 조회해야 한다 — B+Tree range query 가 O(log n + k) 로 해결한다."**
+
+**데이터 모델 (브라우저에서 시연용으로 실행):**
+```sql
+CREATE TABLE payments (
+    id         INT,         -- auto-increment, 시간순 proxy
+    user_id    INT,
+    amount     INT,
+    status     TEXT,         -- 'SUCCESS' | 'FAIL' | 'TIMEOUT'
+    created_at INT           -- Unix timestamp
+);
+```
+
+**시연 3단 구성 (~3분):**
+1. **더미 주입 (5초)** — 10만~100만 건 결제 로그, 실패율 5% / 타임아웃 2% 섞어서 생성
+2. **장애 구간 조회 (30초)** — "새벽 3시 장애 대응" 상황극 → `SELECT * FROM payments WHERE id BETWEEN 30000 AND 31500` → 1ms 내 반환 표시
+3. **선형 vs 인덱스 비교 차트 (1분)** — 같은 범위를 선형 탐색(name 조건)으로 돌려서 막대그래프 2개, "400배 단축" 강조
+
+**UI 버튼 3개 (최소):**
+- [ 더미 주입 ] [ 장애 구간 조회 (range) ] [ 선형 vs 인덱스 비교 ]
+
+### 머지 조건 (MP5 — 선택)
+- [ ] `python3 web/server.py` 로 로컬 실행 확인
+- [ ] 브라우저에서 **결제 로그 더미 주입 / range 조회 / 비교 차트** 3 시나리오 동작
+- [ ] `bptree_range` 호출 결과가 1ms 내 반환됨을 UI 에 명시
+- [ ] README 에 실행 방법 1줄 추가
+
+---
+
+## FE 와 본진 팀원 영향도 (동시 개발 시 주의사항)
+
+**원칙:** FE 는 `./sqlparser --json` 바이너리의 stdout 만 읽는다. C API 직접 호출 없음.
+
+| 팀원 | 파일 | 충돌 위험 | 주의사항 |
+|---|---|---|---|
+| 지용 | `bptree.c`, `bptree.h`, `Makefile` | 🟢 없음 | FE 는 C API 직접 사용 X, 인터페이스 변화 무관 |
+| 정환 | `executor.c`, `json_out.c` | 🟡 **JSON 스키마 합의 필요** | `--json` 출력 필드명/구조 변경 시 FE 파싱 깨짐 → PR 본문에 스키마 명시 |
+| 민철 | `storage.c` | 🟢 거의 없음 | auto-increment id 를 stdout/JSON 에 포함하는지만 FE 에 공유 |
+| 규태 | `bench/`, `web/` | 🟢 본인 영역 | `benchmark.c` stdout 포맷 바꾸면 `server.py` 파서 같이 수정 |
+
+**JSON 스키마 계약 (MP5 착수 시점 기준 동결):**
+- FE 착수 시 현재 `./sqlparser --json` 출력 스키마를 `web/README.md` 에 박아두기
+- 이후 스키마 변경은 정환/규태 합의 후에만 (FE 에서 5분 내 대응 가능한 범위)
+
+**동시 진행 권장 순서:**
+1. 규태: 현재 `--json` 스펙 고정 → FE 착수
+2. 정환/민철 PR 머지 후 → FE 가 출력 diff 확인 → 필요시 파서만 수정
+3. 지용: 본진만 집중, FE 리뷰는 MP5 시점에만
