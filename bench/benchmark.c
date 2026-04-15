@@ -119,10 +119,15 @@ int main(void) {
         if (v >= 3) order = v;
     }
 
-    srand((unsigned)time(NULL));
+    unsigned seed = (unsigned)time(NULL);
+    const char *env_seed = getenv("BENCH_SEED");
+    if (env_seed) {
+        seed = (unsigned)atoi(env_seed);
+    }
+    srand(seed);
 
     printf("=== B+ Tree Benchmark ===\n");
-    printf("  N = %d,  order = %d\n\n", n, order);
+    printf("  N = %d,  order = %d,  seed = %u\n\n", n, order, seed);
 
     /* 키 생성 */
     int *keys = gen_keys(n);
@@ -137,6 +142,17 @@ int main(void) {
 
     /* 1) INSERT 벤치마크 */
     bench_insert(tree, keys, n);
+
+    /* 1.5) INSERT 정합성 검증 */
+    {
+        int verified = 0;
+        for (int i = 0; i < n; i++) {
+            if (bptree_search(tree, keys[i]) >= 0)
+                verified++;
+        }
+        printf("  VERIFY  %d / %d 건 조회 성공 (%.1f%%)\n\n",
+               verified, n, 100.0 * verified / n);
+    }
 
     /* 2) SEARCH 벤치마크 (삽입과 다른 순서로 셔플) */
     shuffle(keys, n);
