@@ -1,4 +1,6 @@
 #include "types.h"
+#include "bptree.h"
+#include "index_registry.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -28,6 +30,23 @@
 #define USERS_CSV_PATH DATA_DIR "/users.csv"
 #define USERS_NESTED_SCHEMA_PATH DATA_SCHEMA_DIR "/users.schema"
 #define USERS_NESTED_CSV_PATH DATA_TABLES_DIR "/users.csv"
+
+static int seed_users_index(void)
+{
+    BPTree *tree;
+
+    index_registry_destroy_all();
+    tree = index_registry_get_or_create("users", 8);
+    if (tree == NULL) {
+        return 1;
+    }
+
+    bptree_insert(tree, 1, 0);
+    bptree_insert(tree, 2, 1);
+    bptree_insert(tree, 3, 2);
+    bptree_insert(tree, 4, 3);
+    return 0;
+}
 
 static char *duplicate_string(const char *source)
 {
@@ -363,6 +382,231 @@ static int test_storage_select_rejects_unknown_column(void)
     return 0;
 }
 
+static int test_execute_select_where_id_uses_bptree_path(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "3");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture indexed SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Chloe | 27") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Indexed SELECT output did not include the indexed row.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_where_id_count_star(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 1;
+    sql->columns = (char **)calloc(1U, sizeof(char *));
+    sql->columns[0] = duplicate_string("COUNT(*)");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "3");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture indexed COUNT(*) output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "COUNT(*)") ||
+        !contains_text(output, "\n1\n") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Indexed COUNT(*) output was not correct.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_where_id_without_registry_falls_back(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    index_registry_destroy_all();
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "3");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture fallback SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Chloe | 27") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("WHERE id query should fall back to storage_select when registry is missing.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_non_id_where_keeps_storage_path(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "name");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "'Bob'");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture non-indexed SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Bob | 24") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Non-id WHERE query should keep storage_select behavior.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_where_id_missing_prints_empty_result(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "999");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture empty indexed SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "(0 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Missing id query did not preserve empty-result formatting.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
 int run_executor_tests(void)
 {
     int status;
@@ -392,8 +636,34 @@ int run_executor_tests(void)
         goto cleanup;
     }
 
+    if (test_execute_select_where_id_uses_bptree_path() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_count_star() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_without_registry_falls_back() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_non_id_where_keeps_storage_path() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_missing_prints_empty_result() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
 cleanup:
     cleanup_fixture_files();
+    index_registry_destroy_all();
     if (status == 0) {
         fprintf(stderr, "[EXECUTOR TESTS] passed\n");
     }

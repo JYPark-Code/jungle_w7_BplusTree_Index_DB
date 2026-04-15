@@ -117,6 +117,8 @@ static int path_exists(const char *path);
 static int parse_schema_definition(const char *text, char *name_out, size_t name_size,
                                    char *type_out, size_t type_size);
 static int load_table_rows(const char *table_path, int schema_count, StorageRowBuffer *rows);
+static int load_row_at_index(const char *table_path, int schema_count, int row_index,
+                             StorageRowBuffer *selection);
 static int append_row_buffer(StorageRowBuffer *buffer, char **row);
 static int evaluate_select_clause(const ColDef *schema, int schema_count,
                                   char **row, int row_count,
@@ -153,8 +155,20 @@ static int evaluate_aggregate(const char *fn, int col_index, ColumnType type,
 static int rowset_alloc(RowSet **out, int row_count, int col_count);
 
 /* ─── Week 7: auto-increment id ─────────────────────────────── */
-static int find_max_id_in_csv(const char *table_path, int id_col_index);
 static int count_csv_rows(const char *table_path);
+static void scan_csv_meta(const char *table_path, int id_col_index,
+                           int *out_max_id, int *out_row_count);
+
+/* 테이블별 next_id / next_row_idx 메타 캐시.
+ * INSERT 성공 시 두 값을 모두 +1 해서 다음 호출 때 CSV 풀스캔을 생략한다. */
+#define STORAGE_META_CACHE_MAX 16
+typedef struct {
+    char table[64];
+    int  next_id;
+    int  next_row_idx;
+} StorageMetaCache;
+static StorageMetaCache s_meta[STORAGE_META_CACHE_MAX];
+static int s_meta_count = 0;
 
 /* 입력: 테이블 이름, optional 컬럼 목록, 값 목록, 값 개수
  * 동작: schema를 읽어 INSERT 값을 schema 순서의 row로 정렬한 뒤 CSV에 append
@@ -214,13 +228,40 @@ int storage_insert(const char *table, char **columns, char **values, int count)
 
         if (!user_has_id) {
             int i;
-            int max_id;
+            int cache_idx = -1;
 
             need_auto_id = 1;
 
-            /* CSV 에서 현재 max id 를 읽어 next_id 결정 (캐시 없이 항상 CSV 기준). */
-            max_id = find_max_id_in_csv(table_path, id_col_index);
-            auto_id = max_id + 1;
+            /* 캐시에서 next_id 조회. 없으면 CSV 한 번 스캔 후 캐시 등록. */
+            for (i = 0; i < s_meta_count; ++i) {
+                if (strcmp(s_meta[i].table, table) == 0) {
+                    cache_idx = i;
+                    break;
+                }
+            }
+            /* 캐시가 있어도 파일이 사라지거나 비어있으면 무효화 */
+            if (cache_idx >= 0 && s_meta[cache_idx].next_row_idx > 0) {
+                STAT_STRUCT st;
+                if (STAT_FUNC(table_path, &st) != 0 || st.st_size == 0) {
+                    s_meta[cache_idx].next_id      = 1;
+                    s_meta[cache_idx].next_row_idx = 0;
+                }
+            }
+            if (cache_idx < 0 && s_meta_count < STORAGE_META_CACHE_MAX) {
+                int max_id = 0;
+                int row_count = 0;
+                cache_idx = s_meta_count++;
+                snprintf(s_meta[cache_idx].table,
+                         sizeof(s_meta[cache_idx].table), "%s", table);
+                scan_csv_meta(table_path, id_col_index, &max_id, &row_count);
+                s_meta[cache_idx].next_id      = max_id + 1;
+                s_meta[cache_idx].next_row_idx = row_count;
+            }
+            if (cache_idx < 0) {
+                goto cleanup;
+            }
+
+            auto_id = s_meta[cache_idx].next_id;
             snprintf(id_str, sizeof(id_str), "%d", auto_id);
 
             /* columns/values 를 확장한 사본 생성 */
@@ -261,13 +302,28 @@ int storage_insert(const char *table, char **columns, char **values, int count)
         }
     }
 
-    /* row_idx: 현재 CSV 행 수 = 새 행이 저장될 0-based 인덱스 */
+    /* row_idx: 캐시에 있으면 바로 사용, 없으면 CSV 스캔으로 초기화 */
     {
-        int row_idx = count_csv_rows(table_path);
+        int row_idx;
+        int meta_idx = -1;
+        {
+            int i;
+            for (i = 0; i < s_meta_count; ++i) {
+                if (strcmp(s_meta[i].table, table) == 0) {
+                    meta_idx = i;
+                    break;
+                }
+            }
+        }
+        if (meta_idx >= 0) {
+            row_idx = s_meta[meta_idx].next_row_idx;
+        } else {
+            row_idx = count_csv_rows(table_path);
+        }
 
         status = append_csv_row(table_path, row, schema_count);
 
-        /* 성공 시 index_registry 를 통해 B+ 트리에 (id, row_idx) 등록 */
+        /* 성공 시 index_registry 를 통해 B+ 트리에 (id, row_idx) 등록 + 캐시 증가 */
         if (status == 0 && id_col_index >= 0) {
             int inserted_id;
             BPTree *tree;
@@ -275,13 +331,14 @@ int storage_insert(const char *table, char **columns, char **values, int count)
             if (need_auto_id) {
                 inserted_id = auto_id;
             } else {
-                /* 사용자가 직접 넣은 id — strtol 로 안전하게 파싱 */
+                /* 사용자가 직접 넣은 id — strtol 로 파싱, 실패 시 에러 */
                 char *endptr;
                 long id_long;
                 errno = 0;
                 id_long = strtol(row[id_col_index], &endptr, 10);
                 if (errno != 0 || endptr == row[id_col_index]) {
-                    id_long = 0;
+                    status = -1;
+                    goto cleanup;
                 }
                 inserted_id = (int)id_long;
             }
@@ -289,6 +346,14 @@ int storage_insert(const char *table, char **columns, char **values, int count)
             tree = index_registry_get_or_create(table, 128);
             if (tree) {
                 bptree_insert(tree, inserted_id, row_idx);
+            }
+
+            /* 캐시 갱신 */
+            if (meta_idx >= 0) {
+                s_meta[meta_idx].next_row_idx++;
+                if (need_auto_id) {
+                    s_meta[meta_idx].next_id++;
+                }
             }
         }
     }
@@ -430,6 +495,64 @@ int storage_select_result(const char *table, ParsedSQL *sql, RowSet **out)
 cleanup:
     free_row_buffer(&selection, 0);
     free_row_buffer(&rows, 1);
+    free(schema);
+    return status;
+}
+
+int storage_select_result_by_row_index(const char *table, ParsedSQL *sql,
+                                       int row_index, RowSet **out)
+{
+    char schema_path[STORAGE_PATH_MAX];
+    char table_path[STORAGE_PATH_MAX];
+    ColDef *schema = NULL;
+    int schema_count = 0;
+    StorageRowBuffer selection = {0};
+    int status = -1;
+
+    if (out == NULL) {
+        fprintf(stderr, "storage_select_result_by_row_index() received NULL out.\n");
+        return -1;
+    }
+    *out = NULL;
+
+    if (table == NULL || table[0] == '\0' || sql == NULL) {
+        fprintf(stderr, "storage_select_result_by_row_index() received invalid arguments.\n");
+        return -1;
+    }
+
+    if (build_schema_path(table, schema_path, sizeof(schema_path)) != 0 ||
+        build_table_path(table, table_path, sizeof(table_path)) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot build path for table '%s'\n", table);
+        return -1;
+    }
+
+    if (load_schema(schema_path, &schema, &schema_count) != 0) {
+        fprintf(stderr, "[storage] SELECT: table '%s' not found (schema missing)\n", table);
+        return -1;
+    }
+
+    if (load_row_at_index(table_path, schema_count, row_index, &selection) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot read indexed row for table '%s'\n", table);
+        goto cleanup;
+    }
+
+    if (sort_selection(sql, schema, schema_count, &selection) != 0) {
+        goto cleanup;
+    }
+
+    if (sql->col_count == 1 && sql->columns != NULL) {
+        char fn[16];
+        char arg[64];
+        if (parse_aggregate_call(sql->columns[0], fn, sizeof(fn), arg, sizeof(arg)) == 0) {
+            status = build_rowset_for_aggregate(sql, schema, schema_count, &selection, out);
+            goto cleanup;
+        }
+    }
+
+    status = build_rowset_from_selection(sql, schema, schema_count, &selection, out);
+
+cleanup:
+    free_row_buffer(&selection, 1);
     free(schema);
     return status;
 }
@@ -922,40 +1045,6 @@ static int build_row_in_schema_order(const ColDef *schema, int schema_count,
 
 /* ─── Week 7: auto-id 헬퍼 ──────────────────────────────────── */
 
-/* CSV 파일에서 id_col_index 번째 컬럼의 최대 정수 값을 반환.
- * 파일이 비어있거나 열 수 없으면 0 반환 (next_id 가 1 부터 시작). */
-static int find_max_id_in_csv(const char *table_path, int id_col_index)
-{
-    FILE *fp;
-    int max_id = 0;
-    char *record = NULL;
-
-    fp = fopen(table_path, "r");
-    if (fp == NULL) {
-        return 0;
-    }
-
-    while (read_csv_record(fp, &record) == 1) {
-        char **fields = NULL;
-        int field_count = 0;
-
-        if (parse_csv_record(record, &fields, &field_count) == 0) {
-            if (id_col_index < field_count && fields[id_col_index] != NULL) {
-                int val = atoi(fields[id_col_index]);
-                if (val > max_id) {
-                    max_id = val;
-                }
-            }
-            free_string_array(fields, field_count);
-        }
-        free(record);
-        record = NULL;
-    }
-
-    fclose(fp);
-    return max_id;
-}
-
 /* CSV 파일의 행 수를 반환 (row_index 계산용). */
 static int count_csv_rows(const char *table_path)
 {
@@ -976,6 +1065,45 @@ static int count_csv_rows(const char *table_path)
 
     fclose(fp);
     return count;
+}
+
+/* CSV 를 한 번만 읽어 max_id 와 row_count 를 동시에 반환.
+ * id_col_index < 0 이면 max_id 는 0 으로 반환. */
+static void scan_csv_meta(const char *table_path, int id_col_index,
+                           int *out_max_id, int *out_row_count)
+{
+    FILE *fp;
+    int max_id = 0;
+    int row_count = 0;
+    char *record = NULL;
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) {
+        *out_max_id    = 0;
+        *out_row_count = 0;
+        return;
+    }
+
+    while (read_csv_record(fp, &record) == 1) {
+        row_count++;
+        if (id_col_index >= 0) {
+            char **fields = NULL;
+            int field_count = 0;
+            if (parse_csv_record(record, &fields, &field_count) == 0) {
+                if (id_col_index < field_count && fields[id_col_index] != NULL) {
+                    int val = atoi(fields[id_col_index]);
+                    if (val > max_id) max_id = val;
+                }
+                free_string_array(fields, field_count);
+            }
+        }
+        free(record);
+        record = NULL;
+    }
+
+    fclose(fp);
+    *out_max_id    = max_id;
+    *out_row_count = row_count;
 }
 
 /* 입력: 테이블 CSV 경로, row 배열, row 길이
@@ -2378,6 +2506,78 @@ static int load_table_rows(const char *table_path, int schema_count, StorageRowB
 
     fclose(fp);
     return 0;
+}
+
+static int load_row_at_index(const char *table_path, int schema_count, int row_index,
+                             StorageRowBuffer *selection)
+{
+    FILE *fp;
+    int current_index = 0;
+    int status = -1;
+
+    if (table_path == NULL || selection == NULL || schema_count <= 0) {
+        return -1;
+    }
+
+    selection->rows = NULL;
+    selection->count = 0;
+    selection->capacity = 0;
+    selection->row_width = schema_count;
+
+    if (row_index < 0) {
+        return 0;
+    }
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    for (;;) {
+        char *record = NULL;
+        char **row = NULL;
+        int row_count = 0;
+        int read_status;
+
+        read_status = read_csv_record(fp, &record);
+        if (read_status == 0) {
+            status = 0;
+            break;
+        }
+        if (read_status < 0) {
+            goto cleanup;
+        }
+
+        if (parse_csv_record(record, &row, &row_count) != 0) {
+            free(record);
+            goto cleanup;
+        }
+        free(record);
+
+        if (row_count != schema_count) {
+            free_string_array(row, row_count);
+            goto cleanup;
+        }
+
+        if (current_index == row_index) {
+            if (append_row_buffer(selection, row) != 0) {
+                free_string_array(row, row_count);
+                goto cleanup;
+            }
+            status = 0;
+            break;
+        }
+
+        free_string_array(row, row_count);
+        current_index++;
+    }
+
+cleanup:
+    fclose(fp);
+    if (status != 0) {
+        free_row_buffer(selection, 1);
+    }
+    return status;
 }
 
 static int evaluate_select_clause(const ColDef *schema, int schema_count,
