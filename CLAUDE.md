@@ -15,6 +15,7 @@ Week 6 SQL 처리기에 B+ 트리 인덱스를 추가하는 1일 스프린트.
 | 정환 | `executor.c` WHERE id 분기 + SQL 처리기 이식 검증 | `feature/executor-index` |
 | 민철 | `storage.c` auto-increment id + `bptree_insert` 연동 | `feature/storage-autoid` |
 | 규태 | `bench/benchmark.c` + 더미 데이터 생성기 + README | `feature/benchmark` |
+| 규태 (추가) | `web/` 웹 데모 (정적 HTML + Python stdlib 중개 서버) | `feature/web-demo` |
 
 ---
 
@@ -188,6 +189,10 @@ PR 올리기 전 반드시 확인:
 │   └── test_bptree.c    ← 지용 (AI 생성)
 ├── bench/
 │   └── benchmark.c      ← 규태
+├── web/                 ← 규태 (보너스: 발표 시연용 웹 UI)
+│   ├── index.html       ← SQL 입력창 + 결과 테이블 + Chart.js 벤치 차트
+│   ├── app.js           ← fetch 로 /api/query, /api/bench 호출
+│   └── server.py        ← http.server 기반 중개 (stdlib만, 의존성 0)
 ├── Makefile
 ├── CLAUDE.md            ← 이 파일
 ├── agent.md
@@ -205,3 +210,30 @@ make bench        # 벤치마크
 make valgrind     # 누수 검사
 make clean
 ```
+
+---
+
+## 웹 데모 (규태, 보너스 과제)
+
+발표 시연 임팩트 강화를 위한 선택 과제. **본진 MP4 머지 완료 후**에만 착수.
+
+### 스택 (의존성 0 원칙)
+- 프론트: 정적 HTML + vanilla JS + Chart.js CDN 한 줄
+- 백엔드: `python3 -m http.server` 계열 — `http.server.BaseHTTPRequestHandler` 직접 상속, stdlib만
+- 빌드 파이프라인 없음 (npm / node / webpack X)
+
+### 동작 방식
+1. `server.py` 가 `./sqlparser`, `./benchmark` 를 `subprocess` 로 호출
+2. `POST /api/query` → sqlparser `--json` 모드 실행 → 결과 JSON 반환
+3. `POST /api/bench` → benchmark 실행 → stdout 파싱해 차트용 JSON 반환
+4. 정적 파일(`index.html`, `app.js`)도 같은 포트에서 서빙 → CORS 불필요
+
+### 제약
+- `include/bptree.h`, `include/types.h`, 기존 C 소스 **수정 금지** — 웹 레이어에서만 작업
+- 기존 `make test` / `make bench` 회귀 0 유지
+- `Makefile` 수정 필요 시 지용에게 PR 요청
+
+### 머지 조건 (MP5 — 선택)
+- [ ] `python3 web/server.py` 로 로컬 실행 확인
+- [ ] 브라우저에서 INSERT / SELECT / 벤치 차트 3가지 시나리오 동작
+- [ ] README 에 실행 방법 1줄 추가

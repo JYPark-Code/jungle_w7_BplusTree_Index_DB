@@ -192,6 +192,39 @@ Speedup : ~128x
 
 ---
 
+### 규태 (보너스) — web/ 웹 시연 UI
+
+**담당 파일:** `web/index.html`, `web/app.js`, `web/server.py` (전부 신설)
+**브랜치:** `feature/web-demo` (MP4 머지 후 생성)
+**전제:** 본진 벤치마크 PR 머지 완료 후에만 착수.
+
+**작업 내용:**
+- `server.py` — `http.server` stdlib 기반 중개 서버
+  - `GET /` → `web/index.html`, `GET /app.js` → 정적 서빙
+  - `POST /api/query` → body 의 SQL 을 `./sqlparser --json` subprocess 로 실행, stdout 을 JSON 으로 그대로 전달
+  - `POST /api/bench` → `./benchmark` 실행, stdout 파싱해 `{insert_ops, search_ops, range_qps}` JSON 반환
+- `index.html` — SQL 입력 `<textarea>` + 결과 `<table>` + 벤치 `<canvas>` 3영역
+- `app.js` — `fetch('/api/query')`, `fetch('/api/bench')` 호출 + Chart.js CDN 으로 막대그래프
+
+**스택 제약 (의존성 0):**
+- npm / node / webpack 사용 금지
+- Python 도 stdlib 만 (Flask, FastAPI 등 외부 패키지 X)
+- Chart.js 는 CDN `<script>` 태그 한 줄로만
+
+**금지 사항:**
+- `include/*.h`, `src/*.c`, `tests/*.c`, `bench/*.c` 전부 **수정 금지** — 웹 레이어에서만 작업
+- `Makefile` 수정이 필요하면 지용에게 요청
+
+**단위 테스트 (AI 생성 위임):**
+- `server.py` 의 SQL 파싱 / 벤치 stdout 파싱 함수는 `unittest` 로 커버
+- 브라우저 동작은 수동 시나리오 체크리스트로 대체 OK
+
+**완료 기준 (MP5, 선택):**
+- `python3 web/server.py` 로컬 실행 → 브라우저에서 INSERT / SELECT / 벤치 차트 3 시나리오 동작
+- 기존 `make test` / `make bench` 회귀 0
+
+---
+
 ## 머지 포인트
 
 | MP | 시점 | 조건 |
@@ -201,6 +234,7 @@ Speedup : ~128x
 | **MP3** | 17:30 | split 완성 + 정환/민철 PR 머지 + 통합 빌드 227+ 통과 |
 | **MP4** | 20:30 | 100만 건 테스트 + valgrind 0 + 규태 PR 머지 |
 | **최종** | 21:00 | dev → main 머지 |
+| **MP5** (선택) | 발표 전 | 규태 `feature/web-demo` PR 머지 — 본진 영향 0 확인 후에만 |
 
 ---
 
@@ -258,6 +292,7 @@ scope 예시: `bptree`, `executor`, `storage`, `bench`, `makefile`
 | `src/executor.c` | 정환 | ❌ |
 | `src/storage.c` | 민철 | ❌ |
 | `bench/benchmark.c` | 규태 | ❌ |
+| `web/` (전체) | 규태 (보너스) | ❌ |
 | `include/types.h` | 전원 수정 금지 | ❌ |
 | `Makefile` | 지용 (각자 필요시 PR로 요청) | PR 경유 |
 

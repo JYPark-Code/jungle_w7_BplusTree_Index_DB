@@ -45,6 +45,7 @@ SELECT * FROM users WHERE name = 'Alice';              -- 선형 탐색 유지
 - Range query 지원: `WHERE id BETWEEN 100 AND 200` (리프 linked list 활용)
 - `bptree_print()` — 삽입/split 과정 ASCII 시각화
 - 레코드 수별 탐색 시간 측정 테이블 출력 (O(log n) vs O(n) 증명)
+- **웹 데모 (보너스):** 정적 HTML + Python stdlib 중개 서버로 브라우저에서 SQL 실행 & 벤치 차트 시각화 (`web/`)
 
 ---
 
@@ -71,6 +72,10 @@ SELECT * FROM users WHERE name = 'Alice';              -- 선형 탐색 유지
 │   └── test_bptree.c    ← NEW: B+ 트리 단위 테스트
 ├── bench/
 │   └── benchmark.c      ← NEW: 100만 건 성능 측정
+├── web/                 ← NEW (보너스): 발표 시연용 웹 UI
+│   ├── index.html       ← SQL 입력창 + 결과 테이블 + 벤치 차트
+│   ├── app.js           ← fetch 로 /api/query, /api/bench 호출
+│   └── server.py        ← http.server 중개 (stdlib만, 의존성 0)
 ├── .devcontainer/
 ├── .github/workflows/build.yml
 ├── Makefile
@@ -106,6 +111,10 @@ make test         # 단위 테스트 (Week 6 회귀 포함)
 make bench        # 100만 건 성능 벤치마크
 make valgrind     # 메모리 누수 검사
 make clean
+
+# 웹 데모 (보너스, 발표 시연용)
+make              # sqlparser / benchmark 빌드 선행
+python3 web/server.py      # → http://localhost:8000 접속
 ```
 
 ---
@@ -118,6 +127,7 @@ make clean
 | 정환 | `executor.c` WHERE id 분기 + 기존 SQL 처리기 이식 검증 |
 | 민철 | `storage.c` auto-increment + `bptree_insert` 연동 |
 | 규태 | `bench/benchmark.c` + 더미 데이터 생성 + README |
+| 규태 (보너스) | `web/` 웹 시연 UI (정적 HTML + Python stdlib 중개 서버) |
 
 ---
 
@@ -146,6 +156,7 @@ main
 | MP2 | `bptree.c` search + insert (split 없이) 완성 → B, C 실제 연결 |
 | MP3 | split 로직 완성 + 전체 통합 빌드 통과 |
 | MP4 | 100만 건 테스트 + valgrind 0 → dev → main 머지 |
+| MP5 (선택) | `web/` 데모 PR 머지 — 본진 회귀 0 확인 후에만 |
 
 ---
 
