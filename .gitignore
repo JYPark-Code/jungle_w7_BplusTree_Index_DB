@@ -10,3 +10,4 @@ test_storage_delete
 test_storage_update
 test_storage_select_result
 data/
+CLAUDE_jiyong.md

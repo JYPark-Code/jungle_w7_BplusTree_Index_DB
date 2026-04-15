@@ -115,9 +115,9 @@ make clean
 | 담당 | 파트 |
 |---|---|
 | 지용 | `bptree.c` 코어 + `bptree.h` 인터페이스 확정 + 레포/Makefile + 머지 |
-| 팀원 A | `executor.c` WHERE id 분기 + 기존 SQL 처리기 이식 검증 |
-| 팀원 B | `storage.c` auto-increment + `bptree_insert` 연동 |
-| 팀원 C | `bench/benchmark.c` + 더미 데이터 생성 + README |
+| 정환 | `executor.c` WHERE id 분기 + 기존 SQL 처리기 이식 검증 |
+| 민철 | `storage.c` auto-increment + `bptree_insert` 연동 |
+| 규태 | `bench/benchmark.c` + 더미 데이터 생성 + README |
 
 ---
 
