@@ -404,6 +404,35 @@ int main(void) {
     do_range(tree, &m);
     do_compare(tree, keys, &m);
 
+    /* ═ machine-readable 라인 (web/server.py 파서용, 3-col 위에 먼저) ═
+     * server.py 가 startswith("LINEAR")/"INDEX"/"SPEEDUP" 로 탐색하므로
+     * pretty layout 전에 plain 텍스트로 한 블록 찍는다. */
+    double linear_s = m.linear_ms / 1000.0;
+    double index_s  = m.index_ms  / 1000.0;
+    printf("INSERT  %d 건  |  %.3f s  |  %.0f ops/s\n",
+           m.n, m.insert_ms / 1000.0,
+           m.insert_ms > 0 ? m.n / (m.insert_ms / 1000.0) : 0);
+    printf("SEARCH  %d 건  |  %.3f s  |  %.0f ops/s  (found %d)\n",
+           m.n, m.search_ms / 1000.0,
+           m.search_ms > 0 ? m.n / (m.search_ms / 1000.0) : 0,
+           m.search_found);
+    printf("RANGE   %d 회 (폭 100)  |  %.3f s  |  %.0f qps  (total hits %d)\n",
+           m.range_queries, m.range_ms / 1000.0,
+           m.range_ms > 0 ? m.range_queries / (m.range_ms / 1000.0) : 0,
+           m.range_found);
+    printf("VERIFY  %d / %d 건 조회 성공 (%.1f%%)\n",
+           m.verify_ok, m.n, 100.0 * m.verify_ok / m.n);
+    printf("LINEAR  %.3f s  |  %.0f qps  (hits %d)\n",
+           linear_s, linear_s > 0 ? m.compare_m / linear_s : 0, m.linear_hits);
+    printf("INDEX   %.3f s  |  %.0f qps  (hits %d)\n",
+           index_s, index_s > 0 ? m.compare_m / index_s : 0, m.index_hits);
+    if (index_s > 0) {
+        printf("SPEEDUP %.1f x  (linear / index)\n", linear_s / index_s);
+    } else {
+        printf("SPEEDUP 측정불가 (인덱스 < 1us)\n");
+    }
+    putchar('\n');
+
     /* 터미널 너비 + 3-col 분할 */
     int term_w = get_term_width();
     if (term_w < 80) term_w = 80;
