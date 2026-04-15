@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = Path(__file__).resolve().parent
 SQLPARSER = ROOT / "sqlparser"
 BENCHMARK = ROOT / "benchmark"
+TREE_SHAPE = ROOT / "tree_shape"
 
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -117,21 +118,42 @@ def run_bench(n: int = 1000000, order: int = 128, seed: int = 42) -> dict:
 
     result = {"raw": proc.stdout}
     for line in proc.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("INSERT"):
-            parts = line.split("|")
+        s = line.strip()
+        # 단일 값 필드
+        if s.startswith("INSERT"):
+            parts = s.split("|")
             if len(parts) >= 3:
                 result["insert_ops"] = parts[2].strip().split()[0]
-        elif line.startswith("SEARCH"):
-            parts = line.split("|")
+        elif s.startswith("SEARCH"):
+            parts = s.split("|")
             if len(parts) >= 3:
                 result["search_ops"] = parts[2].strip().split()[0]
-        elif line.startswith("RANGE"):
-            parts = line.split("|")
+        elif s.startswith("RANGE"):
+            parts = s.split("|")
             if len(parts) >= 3:
                 result["range_qps"] = parts[2].strip().split()[0]
-        elif line.startswith("VERIFY"):
-            result["verify"] = line
+        elif s.startswith("VERIFY"):
+            result["verify"] = s
+        # 선형 vs 인덱스 비교 블록 파싱 — bench_compare 용도
+        elif s.startswith("LINEAR"):
+            parts = s.split("|")
+            if len(parts) >= 2:
+                try:
+                    result["bench_linear_s"] = float(parts[0].split()[1])
+                except (ValueError, IndexError):
+                    pass
+        elif s.startswith("INDEX"):
+            parts = s.split("|")
+            if len(parts) >= 2:
+                try:
+                    result["bench_index_s"] = float(parts[0].split()[1])
+                except (ValueError, IndexError):
+                    pass
+        elif s.startswith("SPEEDUP"):
+            try:
+                result["bench_speedup"] = float(s.split()[1].rstrip("x"))
+            except (ValueError, IndexError):
+                pass
     return result
 
 
@@ -263,6 +285,31 @@ def range_query(lo: int, hi: int) -> dict:
     }
 
 
+def run_tree_shape(n: int = 20, order: int = 4) -> dict:
+    """./tree_shape 실행 → bptree_print stdout 반환.
+    웹 데모 C 섹션: 실제 B+ 트리가 어떻게 성장하는지 라이브 시각화."""
+    if not TREE_SHAPE.exists():
+        return {"error": "tree_shape 바이너리 없음. `make tree_shape` 실행하세요."}
+    if n < 1: n = 1
+    if n > 200: n = 200
+    if order < 3: order = 4
+    if order > 32: order = 32
+    try:
+        proc = subprocess.run(
+            [str(TREE_SHAPE), str(n), str(order)],
+            capture_output=True, text=True, timeout=5,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "tree_shape timeout"}
+    return {
+        "n": n,
+        "order": order,
+        "output": proc.stdout,
+        "stderr": proc.stderr,
+        "error": None if proc.returncode == 0 else f"exit {proc.returncode}",
+    }
+
+
 def compare_search(lo: int, hi: int) -> dict:
     """선형 vs 인덱스 비교. id 조건(인덱스) vs status 조건(선형)."""
     # 인덱스 검색 (id BETWEEN — executor 가 bptree_range 경로로 분기하는 유일한 형태)
@@ -364,6 +411,29 @@ class Handler(BaseHTTPRequestHandler):
             lo = data.get("lo", 30000)
             hi = data.get("hi", 31500)
             self._json(200, compare_search(lo, hi))
+
+        elif self.path == "/api/bench_compare":
+            # 순수 자료구조 레벨 선형 vs 인덱스 비교 — bench 의 compare 섹션만 사용.
+            # 기본 N=1,000,000, compare M=1,000 (benchmark.c 기본값과 동일).
+            n = data.get("n", 1000000)
+            order = data.get("order", 128)
+            seed = data.get("seed", 42)
+            res = run_bench(n, order, seed)
+            # run_bench 에서 추출한 bench_* 필드만 꺼내 반환 (FE 데이터 축약)
+            self._json(200, {
+                "n": n,
+                "m": 1000,
+                "linear_s": res.get("bench_linear_s"),
+                "index_s": res.get("bench_index_s"),
+                "speedup": res.get("bench_speedup"),
+                "error": res.get("error"),
+            })
+
+        elif self.path == "/api/tree_shape":
+            # C 섹션 용 — B+ 트리 insert + bptree_print 라이브 출력
+            n = int(data.get("n", 20))
+            order = int(data.get("order", 4))
+            self._json(200, run_tree_shape(n, order))
 
         else:
             self._json(404, {"error": "not found"})

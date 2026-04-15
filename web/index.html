@@ -436,6 +436,107 @@ table {
 }
 .inline-note.is-active { color: var(--white); }
 
+/* ═══════ DUAL COMPARE (A) ════════════════════════════════════ */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-top: 24px;
+}
+@media (max-width: 860px) {
+  .compare-grid { grid-template-columns: 1fr; }
+}
+.compare-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 20px 22px;
+  position: relative;
+}
+.compare-card h4 {
+  font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--grey-40); margin-bottom: 4px;
+}
+.compare-card .subhead {
+  font-size: 12px; color: var(--grey-60); margin-bottom: 14px;
+}
+.compare-card .big-number { font-size: clamp(40px, 4.5vw, 56px); }
+.compare-card .big-label { color: var(--grey-20); }
+.compare-delta {
+  margin-top: 18px; padding: 14px 16px;
+  background: rgba(213,0,28,0.05);
+  border-left: 3px solid var(--red);
+  border-radius: 4px;
+  font-size: 13px; line-height: 1.7; color: var(--grey-10);
+}
+.compare-delta b { color: var(--white); }
+.compare-delta .formula {
+  display: inline-block;
+  font-family: var(--mono); font-size: 12px;
+  padding: 2px 8px; margin: 0 2px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px; color: var(--white);
+}
+
+/* ═══════ B+ TREE BG (B) — section 02 배경 데코 ═══════════════ */
+.scenario-stage { position: relative; overflow: hidden; }
+.bg-tree-wrap {
+  position: absolute; top: 0; right: -20px; bottom: 0;
+  width: 45%; pointer-events: none; opacity: 0.12;
+  display: flex; align-items: center; justify-content: flex-end;
+  z-index: 0;
+}
+.bg-tree-wrap svg { width: 100%; height: auto; max-height: 520px; }
+.scenario-stage > .card-porsche { position: relative; z-index: 1; }
+
+@keyframes tree-pulse-node {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+@keyframes tree-draw-edge {
+  from { stroke-dashoffset: 100; }
+  to   { stroke-dashoffset: 0; }
+}
+.bg-tree-wrap .bt-node { animation: tree-pulse-node 4s var(--ease) infinite; }
+.bg-tree-wrap .bt-node-2 { animation-delay: 0.4s; }
+.bg-tree-wrap .bt-node-3 { animation-delay: 0.8s; }
+.bg-tree-wrap .bt-node-4 { animation-delay: 1.2s; }
+.bg-tree-wrap .bt-node-5 { animation-delay: 1.6s; }
+.bg-tree-wrap .bt-leaf-link {
+  stroke-dasharray: 100;
+  animation: tree-draw-edge 6s linear infinite;
+}
+
+/* ═══════ LIVE TREE PANEL (C) ═════════════════════════════════ */
+.tree-panel {
+  background: #0a0a0d;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  margin-top: 24px;
+  overflow: hidden;
+}
+.tree-panel-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 16px;
+  padding: 16px 22px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.tree-panel-head .field { min-width: 120px; }
+.tree-panel-head .hint {
+  font-size: 12px; color: var(--grey-40); margin-left: auto;
+}
+#tree-output {
+  padding: 22px 28px;
+  font-family: var(--mono);
+  font-size: 13px; line-height: 1.7;
+  color: var(--grey-10);
+  white-space: pre;
+  overflow-x: auto;
+  min-height: 220px;
+  max-height: 520px;
+}
+#tree-output.placeholder { color: var(--grey-60); font-style: italic; }
+
 /* ═══════ CHART CAPTION ═══════════════════════════════════════ */
 .chart-caption {
   display: block; margin-top: 14px;
@@ -539,7 +640,85 @@ table {
 
 <!-- ═══ 02 · RANGE — white bg ═══ -->
 <section class="section-white">
-  <div class="grid">
+  <div class="grid scenario-stage">
+
+    <!-- B+ 트리 삽입 시각화 배경 — The new Index Query 우측 데코 -->
+    <div class="bg-tree-wrap" aria-hidden="true">
+      <svg viewBox="0 0 420 480" xmlns="http://www.w3.org/2000/svg">
+        <!-- 엣지 (부모→자식) -->
+        <g stroke="#0e0e12" stroke-width="1.2" fill="none" opacity="0.55">
+          <path d="M210,70  L120,150"/>
+          <path d="M210,70  L300,150"/>
+          <path d="M120,185 L60,265"/>
+          <path d="M120,185 L180,265"/>
+          <path d="M300,185 L240,265"/>
+          <path d="M300,185 L360,265"/>
+        </g>
+        <!-- 리프 linked list (수평 화살표) -->
+        <g stroke="#d5001c" stroke-width="1.2" fill="none" class="bt-leaf-link">
+          <path d="M90,405 L150,405"/>
+          <path d="M210,405 L270,405"/>
+          <path d="M330,405 L390,405"/>
+        </g>
+        <!-- 루트 (internal) -->
+        <g class="bt-node">
+          <rect x="170" y="30" width="80" height="40" rx="4" fill="#0e0e12"/>
+          <text x="210" y="55" text-anchor="middle" fill="#fff"
+                font-family="JetBrains Mono" font-size="14" font-weight="600">50</text>
+        </g>
+        <!-- 중간 레벨 -->
+        <g class="bt-node bt-node-2">
+          <rect x="80"  y="145" width="80" height="40" rx="4" fill="#0e0e12"/>
+          <text x="120" y="170" text-anchor="middle" fill="#fff"
+                font-family="JetBrains Mono" font-size="13" font-weight="500">25</text>
+        </g>
+        <g class="bt-node bt-node-3">
+          <rect x="260" y="145" width="80" height="40" rx="4" fill="#0e0e12"/>
+          <text x="300" y="170" text-anchor="middle" fill="#fff"
+                font-family="JetBrains Mono" font-size="13" font-weight="500">75</text>
+        </g>
+        <!-- 리프 -->
+        <g class="bt-node bt-node-4">
+          <rect x="20"  y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
+          <text x="60"  y="295" text-anchor="middle" fill="#0e0e12"
+                font-family="JetBrains Mono" font-size="11">10,15,20</text>
+        </g>
+        <g class="bt-node bt-node-5">
+          <rect x="140" y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
+          <text x="180" y="295" text-anchor="middle" fill="#0e0e12"
+                font-family="JetBrains Mono" font-size="11">30,40,45</text>
+        </g>
+        <g class="bt-node bt-node-4">
+          <rect x="200" y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
+          <text x="240" y="295" text-anchor="middle" fill="#0e0e12"
+                font-family="JetBrains Mono" font-size="11">55,60,70</text>
+        </g>
+        <g class="bt-node bt-node-5">
+          <rect x="320" y="265" width="80" height="50" rx="4" fill="#fff" stroke="#0e0e12"/>
+          <text x="360" y="295" text-anchor="middle" fill="#0e0e12"
+                font-family="JetBrains Mono" font-size="11">80,90,99</text>
+        </g>
+        <!-- 리프 링크드 리스트 블록 -->
+        <g fill="#fff" stroke="#d5001c" stroke-width="1.2">
+          <rect x="30"  y="385" width="60" height="40" rx="4"/>
+          <rect x="150" y="385" width="60" height="40" rx="4"/>
+          <rect x="270" y="385" width="60" height="40" rx="4"/>
+          <rect x="390" y="385" width="20" height="40" rx="4"/>
+        </g>
+        <g font-family="JetBrains Mono" font-size="10" fill="#0e0e12" text-anchor="middle">
+          <text x="60"  y="410">L1</text>
+          <text x="180" y="410">L2</text>
+          <text x="300" y="410">L3</text>
+          <text x="400" y="410">L4</text>
+        </g>
+        <!-- 범례 -->
+        <g font-family="Inter" font-size="10" fill="#0e0e12">
+          <text x="20" y="460">B+ Tree · internal → leaf → linked list</text>
+          <text x="20" y="474" fill="#d5001c">bptree_range 가 따라가는 경로</text>
+        </g>
+      </svg>
+    </div>
+
     <div class="sec-head reveal">
       <div class="sec-head-label">02 &middot; Range Query</div>
       <h2 class="sec-head-title">장애 구간 <span class="red">조회.</span></h2>
@@ -561,7 +740,7 @@ table {
   </div>
 </section>
 
-<!-- ═══ 03 · COMPARE — dark bg ═══ -->
+<!-- ═══ 03 · COMPARE — dark bg — 이중 비교(A) ═══ -->
 <section class="section-dark">
   <div class="grid">
     <div class="sec-head reveal">
@@ -572,7 +751,54 @@ table {
       <button class="btn btn-red" id="btn-compare">Compare</button>
       <div id="compare-summary"></div>
       <div class="chart-area" id="chart-area">
-        <canvas id="chart"></canvas>
+        <div class="compare-grid">
+          <div class="compare-card">
+            <h4>SQL end-to-end</h4>
+            <div class="subhead">/api/compare · subprocess + ensure_index rebuild 포함</div>
+            <canvas id="chart"></canvas>
+            <div id="sql-summary" style="margin-top:14px"></div>
+          </div>
+          <div class="compare-card">
+            <h4>자료구조 순수</h4>
+            <div class="subhead">make bench · bptree_search 인-프로세스 호출만</div>
+            <canvas id="chart-bench"></canvas>
+            <div id="bench-summary" style="margin-top:14px"></div>
+          </div>
+        </div>
+        <div class="compare-delta" id="compare-delta"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 04 · LIVE TREE — dark bg — bptree_print(C) ═══ -->
+<section class="section-dark" style="padding-top:0">
+  <div class="grid">
+    <div class="sec-head reveal">
+      <div class="sec-head-label" style="color:var(--grey-40)">04 &middot; Tree Anatomy</div>
+      <h2 class="sec-head-title">B+ Tree <span class="red">해부.</span></h2>
+    </div>
+    <div class="card-dark reveal d1">
+      <div class="controls">
+        <div class="field">
+          <span class="field-label">Records</span>
+          <input type="number" class="input-w" id="tree-n" value="20" min="1" max="200" />
+        </div>
+        <div class="field">
+          <span class="field-label">Order</span>
+          <input type="number" class="input-w" id="tree-order" value="4" min="3" max="32" />
+        </div>
+        <button class="btn btn-d-border" id="btn-tree">Print tree</button>
+      </div>
+      <div class="tree-panel">
+        <div class="tree-panel-head">
+          <span style="font-size:13px;color:var(--grey-20);font-weight:500">
+            실제 <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:3px">bptree_print()</code>
+            출력 — subprocess 로 tree_shape 실행
+          </span>
+          <span class="hint">N/order 변경 후 Print tree 클릭</span>
+        </div>
+        <div id="tree-output" class="placeholder">아직 출력 없음. 위 버튼으로 실행해주세요.</div>
       </div>
     </div>
   </div>
