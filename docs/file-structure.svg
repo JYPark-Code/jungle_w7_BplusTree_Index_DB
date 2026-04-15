@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" font-family="ui-sans-serif, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fee2e2"/><stop offset="1" stop-color="#fecaca"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#dcfce7"/><stop offset="1" stop-color="#bbf7d0"/>
+    </linearGradient>
+    <linearGradient id="g3" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#dbeafe"/><stop offset="1" stop-color="#bfdbfe"/>
+    </linearGradient>
+    <linearGradient id="g4" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fef3c7"/><stop offset="1" stop-color="#fde68a"/>
+    </linearGradient>
+    <linearGradient id="g5" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#ede9fe"/><stop offset="1" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <linearGradient id="g6" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#cffafe"/><stop offset="1" stop-color="#a5f3fc"/>
+    </linearGradient>
+    <linearGradient id="g7" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fce7f3"/><stop offset="1" stop-color="#fbcfe8"/>
+    </linearGradient>
+    <linearGradient id="g8" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <style>
+      .title { font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .group-title { font-size: 14px; font-weight: 700; fill: #0f172a; }
+      .item { font-size: 12px; fill: #1e293b; font-family: ui-monospace, monospace; }
+      .note { font-size: 10px; fill: #475569; }
+      .tag { font-size: 10px; font-weight: 700; fill: #fff; }
+    </style>
+  </defs>
+
+  <text x="500" y="34" text-anchor="middle" class="title">프로젝트 구조 — 8 영역</text>
+
+  <!-- include -->
+  <g transform="translate(40,70)">
+    <rect width="290" height="110" rx="10" fill="url(#g1)" stroke="#f87171" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">📜  include/ — 계약 (수정 금지)</text>
+    <text x="20" y="48" class="item">types.h</text>
+    <text x="20" y="68" class="item">bptree.h</text>
+    <text x="20" y="88" class="item">index_registry.h</text>
+    <text x="140" y="48" class="note">ParsedSQL, RowSet, WhereClause</text>
+    <text x="140" y="68" class="note">B+ 트리 공개 API (MP1 동결)</text>
+    <text x="140" y="88" class="note">table → BPTree* 매핑</text>
+  </g>
+
+  <!-- src -->
+  <g transform="translate(350,70)">
+    <rect width="300" height="210" rx="10" fill="url(#g2)" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">⚙️  src/ — 실행 엔진</text>
+    <text x="20" y="48" class="item">main.c</text>
+    <text x="20" y="68" class="item">parser.c</text>
+    <text x="20" y="88" class="item">executor.c</text>
+    <text x="20" y="108" class="item">storage.c</text>
+    <text x="20" y="128" class="item">bptree.c</text>
+    <text x="20" y="148" class="item">index_registry.c</text>
+    <text x="20" y="168" class="item">ast_print.c</text>
+    <text x="20" y="188" class="item">json_out.c</text>
+    <text x="20" y="208" class="item">sql_format.c</text>
+    <text x="160" y="48" class="note">entry point</text>
+    <text x="160" y="68" class="note">tokenize + AST</text>
+    <text x="160" y="88" class="note">index/range 분기</text>
+    <text x="160" y="108" class="note">CSV + BIN + 캐시 5종</text>
+    <text x="160" y="128" class="note">leaf/internal split</text>
+    <text x="160" y="148" class="note">다중 테이블</text>
+    <text x="160" y="168" class="note">Week 6 유지</text>
+    <text x="160" y="188" class="note">Week 6 유지</text>
+    <text x="160" y="208" class="note">Week 6 유지</text>
+  </g>
+
+  <!-- tests -->
+  <g transform="translate(670,70)">
+    <rect width="290" height="210" rx="10" fill="url(#g3)" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">🧪  tests/ — 회귀 방어</text>
+    <text x="20" y="48" class="item">test_parser.c          208</text>
+    <text x="20" y="68" class="item">test_executor.c</text>
+    <text x="20" y="88" class="item">test_bptree.c           56</text>
+    <text x="20" y="108" class="item">test_storage_insert.c</text>
+    <text x="20" y="128" class="item">test_storage_delete.c</text>
+    <text x="20" y="148" class="item">test_storage_update.c</text>
+    <text x="20" y="168" class="item">test_index_registry.c   15</text>
+    <text x="20" y="188" class="item">test_benchmark.c        17</text>
+    <text x="20" y="208" class="note">CI 에서 valgrind 포함 자동 실행</text>
+  </g>
+
+  <!-- bench + scripts -->
+  <g transform="translate(40,200)">
+    <rect width="290" height="80" rx="10" fill="url(#g4)" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">📈  bench/ · scripts/</text>
+    <text x="20" y="48" class="item">bench/benchmark.c</text>
+    <text x="20" y="68" class="item">scripts/gen_payments_fixture.py</text>
+    <text x="172" y="48" class="note">1M 건 성능 측정</text>
+    <text x="240" y="68" class="note">CSV + BIN</text>
+  </g>
+
+  <!-- web -->
+  <g transform="translate(40,300)">
+    <rect width="290" height="110" rx="10" fill="url(#g5)" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">🌐  web/ — 의존성 0 데모</text>
+    <text x="20" y="48" class="item">server.py</text>
+    <text x="20" y="68" class="item">index.html</text>
+    <text x="20" y="88" class="item">app.js</text>
+    <text x="20" y="108" class="item">cursor-trail.js</text>
+    <text x="160" y="48" class="note">stdlib HTTP + subprocess</text>
+    <text x="160" y="68" class="note">Porsche 오마주 + Chart.js</text>
+    <text x="160" y="88" class="note">/api/range · /api/compare</text>
+    <text x="160" y="108" class="note">UI 디테일</text>
+  </g>
+
+  <!-- docs -->
+  <g transform="translate(350,300)">
+    <rect width="300" height="110" rx="10" fill="url(#g6)" stroke="#06b6d4" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">🖼  docs/ — 발표 자료</text>
+    <text x="20" y="48" class="item">architecture.svg</text>
+    <text x="20" y="68" class="item">file-structure.svg</text>
+    <text x="20" y="108" class="note">README 에서 참조되는 인포그래픽</text>
+  </g>
+
+  <!-- data -->
+  <g transform="translate(670,300)">
+    <rect width="290" height="110" rx="10" fill="url(#g7)" stroke="#ec4899" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">💾  data/ — 런타임 파일 (.gitignore)</text>
+    <text x="20" y="48" class="item">schema/&lt;t&gt;.schema</text>
+    <text x="20" y="68" class="item">tables/&lt;t&gt;.csv</text>
+    <text x="20" y="88" class="item">tables/&lt;t&gt;.bin</text>
+    <text x="150" y="48" class="note">컬럼 정의</text>
+    <text x="150" y="68" class="note">가변 길이 호환</text>
+    <text x="150" y="88" class="note">고정폭 fast path</text>
+  </g>
+
+  <!-- root configs -->
+  <g transform="translate(40,430)">
+    <rect width="920" height="100" rx="10" fill="url(#g8)" stroke="#64748b" stroke-width="1.5"/>
+    <text x="16" y="24" class="group-title">🔧  루트 — 빌드 / CI / 팀 계약</text>
+    <text x="20" y="48" class="item">Makefile</text>
+    <text x="140" y="48" class="item">.github/workflows/</text>
+    <text x="320" y="48" class="item">.devcontainer/</text>
+    <text x="480" y="48" class="item">CLAUDE.md</text>
+    <text x="620" y="48" class="item">agent.md</text>
+    <text x="760" y="48" class="item">claude_jiyong.md</text>
+    <text x="20" y="68" class="note">make / make test / make bench / make valgrind</text>
+    <text x="20" y="88" class="note">빌드 + valgrind CI 자동 실행  ·  devcontainer 로 동일 환경 제공  ·  팀 역할 / 그라운드 룰 문서화</text>
+  </g>
+</svg>

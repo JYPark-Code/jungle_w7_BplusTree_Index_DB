@@ -68,90 +68,17 @@ SELECT * FROM users WHERE name = 'Alice';              -- 선형 탐색 유지
 
 ## 아키텍처
 
-```
-┌──────────────────────────── Client ────────────────────────────┐
-│   CLI ($ ./sqlparser file.sql)                                 │
-│   Web UI (http://localhost:8080)                               │
-└────────────────┬───────────────────────────────┬───────────────┘
-                 │ SQL 텍스트                     │ HTTP JSON
-                 ▼                                ▼
-        ┌─────────────────┐              ┌──────────────────┐
-        │  parser.c       │              │  web/server.py   │
-        │  tokenize+AST   │              │  subprocess      │
-        │  BETWEEN 지원   │──────────┐   │  ./sqlparser 호출│
-        └────────┬────────┘          │   └────────┬─────────┘
-                 │ ParsedSQL         │            │
-                 ▼                   │            │
-        ┌─────────────────┐          │            │
-        │  executor.c     │          │            │
-        │  QUERY_SELECT → │          │            │
-        │  storage_ensure │          │            │
-        │  _index() lazy  │          │            │
-        │  try_range →    │          │            │
-        │  try_indexed →  │          │            │
-        │  storage_select │          │            │
-        └────────┬────────┘          │            │
-                 │                   │            │
-    ┌────────────┼───────────────────┘            │
-    ▼            ▼                                ▼
-┌──────────┐ ┌──────────────────────────────────────────────────┐
-│ bptree.c │ │ storage.c                                        │
-│ leaf+    │ │   auto-id + append_fp 캐시 + schema 캐시 +       │
-│ internal │ │   path resolution 캐시 + BULK_INSERT_MODE +      │
-│ split    │ │   storage_ensure_index (lazy rebuild)            │
-│ range    │ │   ┌────────────────┬─────────────────────────┐   │
-│ print    │ │   │ CSV fallback   │ 고정폭 BIN fast path    │   │
-└────┬─────┘ │   │ (가변 길이)    │ (fseek O(K))            │   │
-     │       │   └────────┬───────┴──────────────┬──────────┘   │
-     ▼       └────────────┼──────────────────────┼──────────────┘
- index_registry           ▼                      ▼
- (테이블별 BPTree*)  data/tables/<t>.csv   data/tables/<t>.bin
-                     data/schema/<t>.schema
-```
+![MiniSQL 아키텍처](docs/architecture.svg)
+
+Client → Parser → Executor → Storage(CSV + BIN) + BPTree. 상세 모듈 책임과 분기 로직은 [`docs/architecture.svg`](docs/architecture.svg).
+
+---
 
 ## 파일 구조
 
-```
-.
-├── include/
-│   ├── types.h          ← ParsedSQL, RowSet, WhereClause, storage_* 선언
-│   │                      (Round 2 에서 value_to + by_row_indices 추가)
-│   ├── bptree.h         ← B+ 트리 공개 API (MP1 동결, 수정 금지)
-│   └── index_registry.h ← 테이블 이름 → BPTree* 매핑
-├── src/
-│   ├── main.c           ← SQL 파일 읽기 → statement 분할 → execute
-│   ├── parser.c         ← tokenize + AST + BETWEEN 파싱
-│   ├── executor.c       ← QUERY_SELECT → lazy ensure_index → range/indexed/linear
-│   ├── storage.c        ← CSV 기반 저장 + 고정폭 BIN 읽기 + 5가지 캐시
-│   │                      (append FP, schema, path, meta, index rebuilt)
-│   ├── bptree.c         ← B+ 트리 구현 (leaf/internal/root split)
-│   ├── index_registry.c ← 다중 테이블 트리 관리
-│   ├── ast_print.c / json_out.c / sql_format.c ← Week 6 그대로
-├── tests/
-│   ├── test_parser.c       ← BETWEEN 파싱 등 208 assertion
-│   ├── test_executor.c     ← 인덱스/BETWEEN 분기 정합성
-│   ├── test_bptree.c       ← 56 assertion
-│   ├── test_storage_*.c    ← insert/delete/update + 인덱스 동기화
-│   ├── test_index_registry.c
-│   └── test_benchmark.c    ← 벤치 17 케이스
-├── bench/
-│   └── benchmark.c         ← 100만 건 INSERT/SEARCH/RANGE + 선형 vs 인덱스 비교
-├── scripts/
-│   └── gen_payments_fixture.py ← 결제 더미 CSV + 고정폭 BIN 동시 생성기
-├── web/                    ← 웹 데모 (의존성 0)
-│   ├── index.html          ← Porsche 오마주 UI + Chart.js
-│   ├── app.js              ← /api/range, /api/compare 등 fetch
-│   ├── cursor-trail.js
-│   └── server.py           ← stdlib http.server + subprocess sqlparser 중개
-├── data/                   ← .gitignore (로컬 전용)
-│   ├── schema/<table>.schema
-│   └── tables/<table>.csv  + <table>.bin (선택적 fast path)
-├── .devcontainer/
-├── .github/workflows/build.yml ← make + test + valgrind 자동
-├── Makefile
-├── CLAUDE.md / agent.md / claude_jiyong.md ← 팀 계약 문서
-└── README.md
-```
+![프로젝트 구조](docs/file-structure.svg)
+
+8 개 영역으로 분리: `include/`(계약) · `src/`(실행 엔진) · `tests/`(회귀) · `bench/` + `scripts/`(성능/픽스처) · `web/`(데모) · `docs/`(자료) · `data/`(런타임) · 루트(빌드/CI/문서). 자세한 배치는 [`docs/file-structure.svg`](docs/file-structure.svg).
 
 ---
 
@@ -312,11 +239,10 @@ CSV 와 BIN 을 **동일 데이터로 동시에** 씀. 바이너리 포맷은 `s
 
 | 담당 | 파트 |
 |---|---|
-| 지용 | `bptree.c` 코어 + `bptree.h` 인터페이스 확정 + 레포/Makefile + 머지 |
-| 정환 | `executor.c` WHERE id 분기 + 기존 SQL 처리기 이식 검증 |
-| 민철 | `storage.c` auto-increment + `bptree_insert` 연동 |
-| 규태 | `bench/benchmark.c` + 더미 데이터 생성 + README |
-| 규태 (보너스) | `web/` 웹 시연 UI (정적 HTML + Python stdlib 중개 서버) |
+| **지용** (PM) | `bptree.c` 코어 + `bptree.h` 인터페이스 확정 + 레포/Makefile + 머지 · Round 2 BETWEEN 파서 확장 + lazy rebuild · Round 3 **INSERT 10,000× 가속**(append FP / schema / path / meta 캐시 + BULK_INSERT_MODE) + **고정폭 바이너리 저장 레이어** + `scripts/gen_payments_fixture.py` + `docs/` 인포그래픽 + README 발표 자료화 |
+| **정환** | `executor.c` — `WHERE id = ?` 분기 + `WHERE id BETWEEN A AND B` range 경로(`executor_try_range_select` → `bptree_range` → `storage_select_result_by_row_indices`) + 테스트 |
+| **민철** | `storage.c` — auto-increment id + `bptree_insert` 연동 + `scan_csv_meta` 캐시(INSERT 풀스캔 2회→1회) + DELETE/UPDATE 후 인덱스 rebuild 동기화 + 테스트 |
+| **규태** | `bench/benchmark.c` 100만 건 INSERT/SEARCH/RANGE + 선형 vs 인덱스 비교 벤치 · `web/` 결제 로그 웹 데모 (정적 HTML + Python stdlib 중개 서버, 의존성 0) + Porsche 오마주 UI |
 
 ---
 
