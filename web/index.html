@@ -436,48 +436,75 @@ table {
 }
 .inline-note.is-active { color: var(--white); }
 
-/* ═══════ DUAL COMPARE (A) ════════════════════════════════════ */
+/* ═══════ DUAL COMPARE (A) — 3등분 full width ═════════════════ */
 .compare-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 32px;
-  margin-top: 24px;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 24px;
+  margin-top: 28px;
 }
-@media (max-width: 860px) {
+@media (max-width: 1100px) {
+  .compare-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px) {
   .compare-grid { grid-template-columns: 1fr; }
 }
 .compare-card {
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 10px;
-  padding: 20px 22px;
+  padding: 26px 28px;
   position: relative;
+  display: flex; flex-direction: column;
+  min-height: 420px;
 }
 .compare-card h4 {
-  font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--grey-40); margin-bottom: 4px;
 }
 .compare-card .subhead {
-  font-size: 12px; color: var(--grey-60); margin-bottom: 14px;
+  font-size: 12.5px; color: var(--grey-60); margin-bottom: 16px;
 }
-.compare-card .big-number { font-size: clamp(40px, 4.5vw, 56px); }
-.compare-card .big-label { color: var(--grey-20); }
-.compare-delta {
-  margin-top: 18px; padding: 14px 16px;
+.compare-card canvas {
+  flex: 1; max-height: 260px;
+}
+.compare-card .big-number { font-size: clamp(48px, 5vw, 64px); margin-top: 10px; }
+.compare-card .big-label { color: var(--grey-20); font-size: 14px; }
+
+/* 3rd 컬럼 — 차이 설명 카드 */
+.compare-card.delta-card {
   background: rgba(213,0,28,0.05);
+  border: 1px solid rgba(213,0,28,0.18);
   border-left: 3px solid var(--red);
-  border-radius: 4px;
-  font-size: 13px; line-height: 1.7; color: var(--grey-10);
+  min-height: 420px;
 }
-.compare-delta b { color: var(--white); }
-.compare-delta .formula {
+.compare-card.delta-card h4 { color: var(--red); }
+.compare-delta-body {
+  font-size: 13.5px; line-height: 1.75; color: var(--grey-10);
+  margin-top: 12px;
+}
+.compare-delta-body b { color: var(--white); }
+.compare-delta-body .formula {
   display: inline-block;
   font-family: var(--mono); font-size: 12px;
   padding: 2px 8px; margin: 0 2px;
-  background: rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.08);
   border-radius: 4px; color: var(--white);
 }
+
+/* Range 연동 배지 */
+.range-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px; margin-bottom: 12px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 999px;
+  font-size: 12.5px; color: var(--grey-20);
+  font-family: var(--mono);
+}
+.range-link b { color: var(--white); font-weight: 600; }
+.range-link .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
 
 /* ═══════ B+ TREE BG (B) — section 02 배경 데코 ═══════════════ */
 .scenario-stage { position: relative; overflow: hidden; }
@@ -508,34 +535,67 @@ table {
   animation: tree-draw-edge 6s linear infinite;
 }
 
-/* ═══════ LIVE TREE PANEL (C) ═════════════════════════════════ */
-.tree-panel {
-  background: #0a0a0d;
+/* ═══════ LIVE TREE (C) — SVG 도형 시각화 ══════════════════════ */
+.tree-help {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+@media (max-width: 720px) { .tree-help { grid-template-columns: 1fr; } }
+.tree-help-item {
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  font-size: 13px; line-height: 1.6; color: var(--grey-20);
+}
+.tree-help-item b { color: var(--white); }
+.tree-help-item code {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 6px; border-radius: 3px;
+  font-family: var(--mono); font-size: 12px;
+}
+
+.tree-svg-wrap {
+  margin-top: 24px;
+  background: linear-gradient(180deg, #0a0a0d 0%, #14141a 100%);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
-  margin-top: 24px;
-  overflow: hidden;
-}
-.tree-panel-head {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 16px;
-  padding: 16px 22px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-}
-.tree-panel-head .field { min-width: 120px; }
-.tree-panel-head .hint {
-  font-size: 12px; color: var(--grey-40); margin-left: auto;
-}
-#tree-output {
-  padding: 22px 28px;
-  font-family: var(--mono);
-  font-size: 13px; line-height: 1.7;
-  color: var(--grey-10);
-  white-space: pre;
+  padding: 28px 20px;
   overflow-x: auto;
-  min-height: 220px;
-  max-height: 520px;
 }
-#tree-output.placeholder { color: var(--grey-60); font-style: italic; }
+.tree-svg-wrap.placeholder {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 240px;
+  color: var(--grey-60); font-style: italic;
+}
+#tree-svg { display: block; margin: 0 auto; }
+
+/* 트리 노드 애니메이션 — 삽입 순서대로 페이드-인 */
+@keyframes tree-node-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.tree-node-root rect { fill: var(--red); }
+.tree-node-root text { fill: #fff; font-weight: 600; }
+.tree-node-internal rect { fill: #1e1e24; stroke: #3c3c44; }
+.tree-node-internal text { fill: #fff; }
+.tree-node-leaf rect { fill: #f7f7f8; stroke: #d5001c; stroke-width: 1.5; }
+.tree-node-leaf text { fill: #0e0e12; font-weight: 500; }
+.tree-edge { stroke: #7c7d82; stroke-width: 1.4; fill: none; }
+.tree-leaf-link { stroke: #d5001c; stroke-width: 1.6; fill: none; stroke-dasharray: 3 3; opacity: 0.8; }
+.tree-anim-in {
+  animation: tree-node-in 0.4s var(--ease) both;
+}
+.tree-legend {
+  display: flex; flex-wrap: wrap; gap: 18px;
+  margin-top: 14px; font-size: 12.5px; color: var(--grey-40);
+}
+.tree-legend .sw {
+  display: inline-block; width: 14px; height: 14px; border-radius: 3px;
+  vertical-align: -3px; margin-right: 6px;
+}
 
 /* ═══════ CHART CAPTION ═══════════════════════════════════════ */
 .chart-caption {
@@ -628,7 +688,7 @@ table {
           <span class="field-label">Records</span>
           <input type="number" class="input-w" id="inject-count" value="100000" min="1000" max="1000000" step="10000" />
         </div>
-        <button class="btn btn-d-border" id="btn-inject">Inject data</button>
+        <button class="btn btn-d-border" id="btn-inject">데이터 주입</button>
         <span id="inject-note" class="inline-note"></span>
         <span id="inject-status" class="status-text"></span>
       </div>
@@ -726,14 +786,14 @@ table {
     <div class="card-porsche reveal d1">
       <div class="controls">
         <div class="field">
-          <span class="field-label">From ID</span>
-          <input type="number" class="input-w" id="range-lo" value="30000" />
+          <span class="field-label">ID 범위</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="number" class="input-w" id="range-lo" value="30000" style="width:130px"/>
+            <span style="font-size:20px;color:var(--grey-40);font-weight:300">~</span>
+            <input type="number" class="input-w" id="range-hi" value="31500" style="width:130px"/>
+          </div>
         </div>
-        <div class="field">
-          <span class="field-label">To ID</span>
-          <input type="number" class="input-w" id="range-hi" value="31500" />
-        </div>
-        <button class="btn btn-d-border" id="btn-range">Query</button>
+        <button class="btn btn-d-border" id="btn-range">장애 구간 조회</button>
       </div>
       <div id="range-result"></div>
     </div>
@@ -748,24 +808,37 @@ table {
       <h2 class="sec-head-title">선형 vs <span class="red">인덱스.</span></h2>
     </div>
     <div class="card-dark reveal d1">
-      <button class="btn btn-red" id="btn-compare">Compare</button>
-      <div id="compare-summary"></div>
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn btn-red" id="btn-compare">선형 vs 인덱스 비교</button>
+        <div class="range-link" id="compare-range-link">
+          <span class="dot"></span>
+          위 <b>ID 범위</b> 연동 · <b id="compare-range-display">30000 ~ 31500</b>
+          &nbsp;·&nbsp; K=<b id="compare-k-display">1,501</b>건
+        </div>
+      </div>
+      <div id="compare-summary" style="display:none"></div>
       <div class="chart-area" id="chart-area">
         <div class="compare-grid">
           <div class="compare-card">
-            <h4>SQL end-to-end</h4>
+            <h4>① SQL end-to-end</h4>
             <div class="subhead">/api/compare · subprocess + ensure_index rebuild 포함</div>
             <canvas id="chart"></canvas>
             <div id="sql-summary" style="margin-top:14px"></div>
           </div>
           <div class="compare-card">
-            <h4>자료구조 순수</h4>
+            <h4>② 자료구조 순수</h4>
             <div class="subhead">make bench · bptree_search 인-프로세스 호출만</div>
             <canvas id="chart-bench"></canvas>
             <div id="bench-summary" style="margin-top:14px"></div>
           </div>
+          <div class="compare-card delta-card">
+            <h4>③ 두 배율이 다른 이유</h4>
+            <div class="subhead">같은 "선형 vs 인덱스" 인데 왜?</div>
+            <div class="compare-delta-body" id="compare-delta">
+              <span style="color:var(--grey-60)">왼쪽 <b>비교</b> 버튼을 눌러주세요.</span>
+            </div>
+          </div>
         </div>
-        <div class="compare-delta" id="compare-delta"></div>
       </div>
     </div>
   </div>
@@ -779,26 +852,40 @@ table {
       <h2 class="sec-head-title">B+ Tree <span class="red">해부.</span></h2>
     </div>
     <div class="card-dark reveal d1">
-      <div class="controls">
+      <div class="controls" style="align-items:flex-start">
         <div class="field">
-          <span class="field-label">Records</span>
+          <span class="field-label">레코드 수 (N)</span>
           <input type="number" class="input-w" id="tree-n" value="20" min="1" max="200" />
         </div>
         <div class="field">
-          <span class="field-label">Order</span>
+          <span class="field-label">분기 수 (Order)</span>
           <input type="number" class="input-w" id="tree-order" value="4" min="3" max="32" />
         </div>
-        <button class="btn btn-d-border" id="btn-tree">Print tree</button>
+        <button class="btn btn-red" id="btn-tree">트리 그리기</button>
       </div>
-      <div class="tree-panel">
-        <div class="tree-panel-head">
-          <span style="font-size:13px;color:var(--grey-20);font-weight:500">
-            실제 <code style="background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:3px">bptree_print()</code>
-            출력 — subprocess 로 tree_shape 실행
-          </span>
-          <span class="hint">N/order 변경 후 Print tree 클릭</span>
+
+      <div class="tree-help">
+        <div class="tree-help-item">
+          <b>레코드 수 (N)</b> — 트리에 삽입할 id 개수.
+          1..N 을 랜덤 순서로 넣어 실제 split 이 발생하는 모습을 보여준다.
+          기본 <code>20</code>. 최대 200 (화면 폭 제한).
         </div>
-        <div id="tree-output" class="placeholder">아직 출력 없음. 위 버튼으로 실행해주세요.</div>
+        <div class="tree-help-item">
+          <b>분기 수 (Order)</b> — 한 노드가 가질 수 있는 최대 자식 개수.
+          작을수록 (4) 트리가 금방 깊어져 split 구조가 잘 보이고,
+          클수록 (128) 실제 프로덕션처럼 납작해진다.
+        </div>
+      </div>
+
+      <div id="tree-svg-wrap" class="tree-svg-wrap placeholder">
+        위 <b style="color:var(--white);font-weight:500;margin:0 4px">트리 그리기</b> 를 눌러주세요.
+      </div>
+
+      <div class="tree-legend">
+        <span><span class="sw" style="background:var(--red)"></span>루트 INT</span>
+        <span><span class="sw" style="background:#1e1e24;border:1px solid #3c3c44"></span>중간 INT</span>
+        <span><span class="sw" style="background:#f7f7f8;border:1px solid var(--red)"></span>리프 LEAF</span>
+        <span><span class="sw" style="background:transparent;border-top:2px dashed var(--red);border-radius:0;height:2px;vertical-align:0"></span>리프 linked list (range scan 경로)</span>
       </div>
     </div>
   </div>
