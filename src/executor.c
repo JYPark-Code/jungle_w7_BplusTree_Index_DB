@@ -21,7 +21,22 @@
  */
 
 #include "types.h"
+#include "index_registry.h"
+
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int executor_try_indexed_select(const char *table, ParsedSQL *sql);
+static int executor_should_use_id_index(const ParsedSQL *sql);
+static int executor_parse_lookup_id(const WhereClause *where, int *out_id);
+static void executor_print_rowset_and_free(RowSet *rs);
+static void executor_strip_optional_quotes(const char *input, char *output, size_t output_size);
+static char *executor_trim_whitespace(char *text);
+static int executor_equals_ignore_case(const char *left, const char *right);
 
 /* execute: ParsedSQL 을 받아서 종류에 맞는 storage_* 함수를 호출. */
 void execute(ParsedSQL *sql) {
@@ -39,9 +54,11 @@ void execute(ParsedSQL *sql) {
             break;
 
         case QUERY_SELECT:
-            /* 조회: WHERE / ORDER BY / LIMIT 정보가 sql 안에 다 있어서
-             * sql 자체를 그대로 넘겨준다. */
-            storage_select(sql->table, sql);
+            /* WHERE id = ? 한정으로 B+트리 row index 조회를 먼저 시도한다.
+             * 그 외 모든 SELECT 는 기존 storage_select 선형 경로를 유지한다. */
+            if (executor_try_indexed_select(sql->table, sql) != 0) {
+                storage_select(sql->table, sql);
+            }
             break;
 
         case QUERY_DELETE:
@@ -58,4 +75,151 @@ void execute(ParsedSQL *sql) {
             fprintf(stderr, "[executor] unknown query type\n");
             break;
     }
+}
+
+static int executor_try_indexed_select(const char *table, ParsedSQL *sql)
+{
+    BPTree *tree;
+    RowSet *rs = NULL;
+    int lookup_id;
+    int row_index;
+
+    if (!executor_should_use_id_index(sql)) {
+        return -1;
+    }
+
+    if (executor_parse_lookup_id(&sql->where[0], &lookup_id) != 0) {
+        return -1;
+    }
+
+    tree = index_registry_get(table);
+    if (tree == NULL) {
+        return -1;
+    }
+
+    row_index = bptree_search(tree, lookup_id);
+    if (storage_select_result_by_row_index(table, sql, row_index, &rs) != 0) {
+        rowset_free(rs);
+        return -1;
+    }
+
+    executor_print_rowset_and_free(rs);
+    return 0;
+}
+
+static int executor_should_use_id_index(const ParsedSQL *sql)
+{
+    const WhereClause *where;
+
+    if (sql == NULL || sql->where_count != 1 || sql->where == NULL) {
+        return 0;
+    }
+
+    where = &sql->where[0];
+    return executor_equals_ignore_case(where->column, "id") &&
+           strcmp(where->op, "=") == 0;
+}
+
+static int executor_parse_lookup_id(const WhereClause *where, int *out_id)
+{
+    char literal[sizeof(where->value)];
+    char *trimmed;
+    char *end = NULL;
+    long parsed;
+
+    if (where == NULL || out_id == NULL) {
+        return -1;
+    }
+
+    executor_strip_optional_quotes(where->value, literal, sizeof(literal));
+    trimmed = executor_trim_whitespace(literal);
+    if (trimmed[0] == '\0') {
+        return -1;
+    }
+
+    errno = 0;
+    parsed = strtol(trimmed, &end, 10);
+    if (errno != 0 || end == trimmed) {
+        return -1;
+    }
+
+    while (*end != '\0' && isspace((unsigned char)*end)) {
+        end++;
+    }
+
+    if (*end != '\0' || parsed < INT_MIN || parsed > INT_MAX) {
+        return -1;
+    }
+
+    *out_id = (int)parsed;
+    return 0;
+}
+
+static void executor_print_rowset_and_free(RowSet *rs)
+{
+    if (rs != NULL) {
+        print_rowset(stdout, rs);
+    }
+    rowset_free(rs);
+}
+
+static void executor_strip_optional_quotes(const char *input, char *output, size_t output_size)
+{
+    size_t length;
+    size_t copy_length;
+
+    if (output == NULL || output_size == 0U) {
+        return;
+    }
+
+    if (input == NULL) {
+        output[0] = '\0';
+        return;
+    }
+
+    length = strlen(input);
+    if (length >= 2U &&
+        ((input[0] == '\'' && input[length - 1U] == '\'') ||
+         (input[0] == '"' && input[length - 1U] == '"'))) {
+        input += 1;
+        length -= 2U;
+    }
+
+    copy_length = (length < output_size - 1U) ? length : (output_size - 1U);
+    memcpy(output, input, copy_length);
+    output[copy_length] = '\0';
+}
+
+static char *executor_trim_whitespace(char *text)
+{
+    char *end;
+
+    while (*text != '\0' && isspace((unsigned char)*text)) {
+        text++;
+    }
+
+    end = text + strlen(text);
+    while (end > text && isspace((unsigned char)end[-1])) {
+        end--;
+    }
+
+    *end = '\0';
+    return text;
+}
+
+static int executor_equals_ignore_case(const char *left, const char *right)
+{
+    if (left == NULL || right == NULL) {
+        return 0;
+    }
+
+    while (*left != '\0' && *right != '\0') {
+        if (tolower((unsigned char)*left) != tolower((unsigned char)*right)) {
+            return 0;
+        }
+        left++;
+        right++;
+    }
+
+    return *left == '\0' && *right == '\0';
 }

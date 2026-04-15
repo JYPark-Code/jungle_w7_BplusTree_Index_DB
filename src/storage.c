@@ -117,6 +117,8 @@ static int path_exists(const char *path);
 static int parse_schema_definition(const char *text, char *name_out, size_t name_size,
                                    char *type_out, size_t type_size);
 static int load_table_rows(const char *table_path, int schema_count, StorageRowBuffer *rows);
+static int load_row_at_index(const char *table_path, int schema_count, int row_index,
+                             StorageRowBuffer *selection);
 static int append_row_buffer(StorageRowBuffer *buffer, char **row);
 static int evaluate_select_clause(const ColDef *schema, int schema_count,
                                   char **row, int row_count,
@@ -493,6 +495,64 @@ int storage_select_result(const char *table, ParsedSQL *sql, RowSet **out)
 cleanup:
     free_row_buffer(&selection, 0);
     free_row_buffer(&rows, 1);
+    free(schema);
+    return status;
+}
+
+int storage_select_result_by_row_index(const char *table, ParsedSQL *sql,
+                                       int row_index, RowSet **out)
+{
+    char schema_path[STORAGE_PATH_MAX];
+    char table_path[STORAGE_PATH_MAX];
+    ColDef *schema = NULL;
+    int schema_count = 0;
+    StorageRowBuffer selection = {0};
+    int status = -1;
+
+    if (out == NULL) {
+        fprintf(stderr, "storage_select_result_by_row_index() received NULL out.\n");
+        return -1;
+    }
+    *out = NULL;
+
+    if (table == NULL || table[0] == '\0' || sql == NULL) {
+        fprintf(stderr, "storage_select_result_by_row_index() received invalid arguments.\n");
+        return -1;
+    }
+
+    if (build_schema_path(table, schema_path, sizeof(schema_path)) != 0 ||
+        build_table_path(table, table_path, sizeof(table_path)) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot build path for table '%s'\n", table);
+        return -1;
+    }
+
+    if (load_schema(schema_path, &schema, &schema_count) != 0) {
+        fprintf(stderr, "[storage] SELECT: table '%s' not found (schema missing)\n", table);
+        return -1;
+    }
+
+    if (load_row_at_index(table_path, schema_count, row_index, &selection) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot read indexed row for table '%s'\n", table);
+        goto cleanup;
+    }
+
+    if (sort_selection(sql, schema, schema_count, &selection) != 0) {
+        goto cleanup;
+    }
+
+    if (sql->col_count == 1 && sql->columns != NULL) {
+        char fn[16];
+        char arg[64];
+        if (parse_aggregate_call(sql->columns[0], fn, sizeof(fn), arg, sizeof(arg)) == 0) {
+            status = build_rowset_for_aggregate(sql, schema, schema_count, &selection, out);
+            goto cleanup;
+        }
+    }
+
+    status = build_rowset_from_selection(sql, schema, schema_count, &selection, out);
+
+cleanup:
+    free_row_buffer(&selection, 1);
     free(schema);
     return status;
 }
@@ -2446,6 +2506,78 @@ static int load_table_rows(const char *table_path, int schema_count, StorageRowB
 
     fclose(fp);
     return 0;
+}
+
+static int load_row_at_index(const char *table_path, int schema_count, int row_index,
+                             StorageRowBuffer *selection)
+{
+    FILE *fp;
+    int current_index = 0;
+    int status = -1;
+
+    if (table_path == NULL || selection == NULL || schema_count <= 0) {
+        return -1;
+    }
+
+    selection->rows = NULL;
+    selection->count = 0;
+    selection->capacity = 0;
+    selection->row_width = schema_count;
+
+    if (row_index < 0) {
+        return 0;
+    }
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    for (;;) {
+        char *record = NULL;
+        char **row = NULL;
+        int row_count = 0;
+        int read_status;
+
+        read_status = read_csv_record(fp, &record);
+        if (read_status == 0) {
+            status = 0;
+            break;
+        }
+        if (read_status < 0) {
+            goto cleanup;
+        }
+
+        if (parse_csv_record(record, &row, &row_count) != 0) {
+            free(record);
+            goto cleanup;
+        }
+        free(record);
+
+        if (row_count != schema_count) {
+            free_string_array(row, row_count);
+            goto cleanup;
+        }
+
+        if (current_index == row_index) {
+            if (append_row_buffer(selection, row) != 0) {
+                free_string_array(row, row_count);
+                goto cleanup;
+            }
+            status = 0;
+            break;
+        }
+
+        free_string_array(row, row_count);
+        current_index++;
+    }
+
+cleanup:
+    fclose(fp);
+    if (status != 0) {
+        free_row_buffer(selection, 1);
+    }
+    return status;
 }
 
 static int evaluate_select_clause(const ColDef *schema, int schema_count,
