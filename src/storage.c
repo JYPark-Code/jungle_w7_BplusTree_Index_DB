@@ -21,6 +21,7 @@
 
 #include "types.h"
 #include "bptree.h"
+#include "index_registry.h"
 
 /* ANSI 컬러 매크로 (세인 PR #31 일부 채택).
  * print_rowset 의 헤더 행에만 색을 입혀 SELECT 결과 표를 강조한다.
@@ -155,27 +156,6 @@ static int rowset_alloc(RowSet **out, int row_count, int col_count);
 static int find_max_id_in_csv(const char *table_path, int id_col_index);
 static int count_csv_rows(const char *table_path);
 
-/* 테이블별 next_id 와 B+ 트리 인덱스를 관리하는 간이 캐시. */
-#define MAX_TABLES 16
-static struct {
-    char    table[64];
-    int     next_id;
-    BPTree *index;
-} g_id_cache[MAX_TABLES];
-static int g_id_cache_count = 0;
-
-/* 테이블의 B+ 트리 인덱스를 가져온다. 없으면 생성. */
-static BPTree *get_table_index(const char *table)
-{
-    int i;
-    for (i = 0; i < g_id_cache_count; ++i) {
-        if (strcmp(g_id_cache[i].table, table) == 0) {
-            return g_id_cache[i].index;
-        }
-    }
-    return NULL;
-}
-
 /* 입력: 테이블 이름, optional 컬럼 목록, 값 목록, 값 개수
  * 동작: schema를 읽어 INSERT 값을 schema 순서의 row로 정렬한 뒤 CSV에 append
  *       id 컬럼이 스키마에 있고 사용자가 값을 안 넣었으면 auto-increment id 부여
@@ -234,49 +214,13 @@ int storage_insert(const char *table, char **columns, char **values, int count)
 
         if (!user_has_id) {
             int i;
-            int cache_idx = -1;
+            int max_id;
 
             need_auto_id = 1;
 
-            /* g_id_cache 에서 테이블의 캐시 조회/초기화 */
-            for (i = 0; i < g_id_cache_count; ++i) {
-                if (strcmp(g_id_cache[i].table, table) == 0) {
-                    cache_idx = i;
-                    break;
-                }
-            }
-
-            {
-                /* 항상 CSV 에서 max id 를 읽어 next_id 를 결정.
-                 * 캐시된 값과 비교해서 더 큰 쪽 + 1 을 사용. */
-                int max_id = find_max_id_in_csv(table_path, id_col_index);
-
-                if (cache_idx < 0) {
-                    if (g_id_cache_count < MAX_TABLES) {
-                        cache_idx = g_id_cache_count++;
-                        snprintf(g_id_cache[cache_idx].table,
-                                 sizeof(g_id_cache[cache_idx].table), "%s", table);
-                        g_id_cache[cache_idx].next_id = max_id + 1;
-                        g_id_cache[cache_idx].index = bptree_create(4);
-                    } else {
-                        goto cleanup;
-                    }
-                } else {
-                    /* 캐시가 있어도 CSV 상태와 동기화 */
-                    int csv_next = max_id + 1;
-                    if (csv_next > g_id_cache[cache_idx].next_id) {
-                        g_id_cache[cache_idx].next_id = csv_next;
-                    }
-                    if (g_id_cache[cache_idx].next_id > csv_next) {
-                        /* CSV 가 초기화됨 (삭제 후 재생성 등) — CSV 기준으로 리셋 */
-                        if (max_id == 0) {
-                            g_id_cache[cache_idx].next_id = 1;
-                        }
-                    }
-                }
-            }
-
-            auto_id = g_id_cache[cache_idx].next_id;
+            /* CSV 에서 현재 max id 를 읽어 next_id 결정 (캐시 없이 항상 CSV 기준). */
+            max_id = find_max_id_in_csv(table_path, id_col_index);
+            auto_id = max_id + 1;
             snprintf(id_str, sizeof(id_str), "%d", auto_id);
 
             /* columns/values 를 확장한 사본 생성 */
@@ -323,7 +267,7 @@ int storage_insert(const char *table, char **columns, char **values, int count)
 
         status = append_csv_row(table_path, row, schema_count);
 
-        /* 성공 시 B+ 트리에 (id, row_idx) 등록 + next_id 증가 */
+        /* 성공 시 index_registry 를 통해 B+ 트리에 (id, row_idx) 등록 */
         if (status == 0 && id_col_index >= 0) {
             int inserted_id;
             BPTree *tree;
@@ -331,45 +275,20 @@ int storage_insert(const char *table, char **columns, char **values, int count)
             if (need_auto_id) {
                 inserted_id = auto_id;
             } else {
-                /* 사용자가 직접 넣은 id — row 에서 꺼냄 */
-                inserted_id = atoi(row[id_col_index]);
+                /* 사용자가 직접 넣은 id — strtol 로 안전하게 파싱 */
+                char *endptr;
+                long id_long;
+                errno = 0;
+                id_long = strtol(row[id_col_index], &endptr, 10);
+                if (errno != 0 || endptr == row[id_col_index]) {
+                    id_long = 0;
+                }
+                inserted_id = (int)id_long;
             }
 
-            /* 캐시에 트리가 없으면 생성 (columns==NULL 이라 auto-id 안 탔을 때) */
-            tree = get_table_index(table);
-            if (tree == NULL) {
-                int i;
-                int cache_idx = -1;
-                for (i = 0; i < g_id_cache_count; ++i) {
-                    if (strcmp(g_id_cache[i].table, table) == 0) {
-                        cache_idx = i;
-                        break;
-                    }
-                }
-                if (cache_idx < 0 && g_id_cache_count < MAX_TABLES) {
-                    cache_idx = g_id_cache_count++;
-                    snprintf(g_id_cache[cache_idx].table,
-                             sizeof(g_id_cache[cache_idx].table), "%s", table);
-                    g_id_cache[cache_idx].next_id = inserted_id + 1;
-                    g_id_cache[cache_idx].index = bptree_create(4);
-                }
-                if (cache_idx >= 0) {
-                    tree = g_id_cache[cache_idx].index;
-                }
-            }
-
+            tree = index_registry_get_or_create(table, 128);
             if (tree) {
                 bptree_insert(tree, inserted_id, row_idx);
-            }
-
-            if (need_auto_id) {
-                int i;
-                for (i = 0; i < g_id_cache_count; ++i) {
-                    if (strcmp(g_id_cache[i].table, table) == 0) {
-                        g_id_cache[i].next_id++;
-                        break;
-                    }
-                }
             }
         }
     }
