@@ -425,14 +425,7 @@ table {
 
 <!-- ═══ NAV ═══ -->
 <nav class="nav">
-  <div class="nav-left">
-    <button class="nav-menu">
-      <div class="nav-menu-icon"><span></span><span></span><span></span></div>
-      Menu
-    </button>
-  </div>
-  <div class="nav-brand">MINISQL</div>
-  <div style="width:80px"></div>
+  <div class="nav-brand" style="position:static;transform:none">MINISQL</div>
 </nav>
 
 <!-- ═══ HERO — dark, Porsche style ═══ -->
@@ -453,22 +446,8 @@ table {
   </div>
 </section>
 
-<!-- ═══ SCENARIO — white panel ═══ -->
-<section class="scenario-block" id="scenario">
-  <div class="grid">
-    <div class="reveal">
-      <p class="scenario-text">
-        <strong>새벽 3시, 결제 시스템 장애 발생.</strong>
-        로그에서 3:00~3:15 구간만 빠르게 뽑아야 한다.
-        id는 시간순 auto-increment —
-        <span class="red">id 범위가 곧 시간 구간.</span>
-      </p>
-      <p class="scenario-meta">
-        Payment transaction log &middot; 100K~1M records &middot; B+Tree range query
-      </p>
-    </div>
-  </div>
-</section>
+<!-- scenario removed -->
+<div id="scenario"></div>
 
 <!-- ═══ 01 · INJECT — white bg ═══ -->
 <section class="section-white">
