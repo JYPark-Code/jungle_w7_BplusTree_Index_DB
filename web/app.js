@@ -241,25 +241,25 @@ let benchChart = null;
 
 const _chartOpts = (title, unit) => ({
   responsive: true,
-  // 부모 컨테이너를 꽉 채우도록 비율 유지 해제 (카드가 왼쪽으로 압축돼 보이던 원인)
   maintainAspectRatio: false,
   plugins: {
     legend: { display: false },
     title: {
       display: true, text: title, color: "#fff",
-      font: { size: 14, weight: 600, family: "'Inter', sans-serif" },
-      padding: { top: 2, bottom: 14 },
+      font: { size: 18, weight: 600, family: "'Inter', sans-serif" },  /* 14→18 */
+      padding: { top: 2, bottom: 18 },
     },
   },
   scales: {
     y: {
       beginAtZero: true,
-      title: { display: true, text: unit, color: "#7c7d82" },
-      ticks: { color: "#7c7d82" },
+      title: { display: true, text: unit, color: "#7c7d82",
+               font: { size: 14, family: "'Inter', sans-serif" } },     /* axis label */
+      ticks: { color: "#9c9da2", font: { size: 14 } },                   /* 11→14 */
       grid: { color: "rgba(255,255,255,0.06)" },
     },
     x: {
-      ticks: { color: "#eeeff2", font: { weight: 500 } },
+      ticks: { color: "#eeeff2", font: { size: 14, weight: 500 } },     /* 11→14 */
       grid: { display: false },
     },
   },
@@ -476,8 +476,8 @@ function renderTreeSvg(tree) {
     const label = n.keys.join(", ");
     nodeG += `<g class="${cls} tree-anim-in" data-nid="${i}" style="animation-delay:${(i * 60)}ms">
       <rect x="${n.x}" y="${y}" width="${n.width}" height="${NODE_H}" rx="6"/>
-      <text x="${n.x + n.width / 2}" y="${y + NODE_H / 2 + 5}"
-            text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12">${label}</text>
+      <text x="${n.x + n.width / 2}" y="${y + NODE_H / 2 + 6}"
+            text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="16" font-weight="600">${label}</text>
     </g>`;
   });
 
