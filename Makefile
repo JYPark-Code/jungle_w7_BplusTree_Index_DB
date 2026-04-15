@@ -25,6 +25,8 @@ TEST_SRCS = $(TEST_DIR)/test_parser.c \
 STORAGE_TEST_TARGETS = test_storage_insert test_storage_delete test_storage_update test_storage_select_result
 STORAGE_TEST_DEPS = $(SRC_DIR)/storage.c
 SELECT_RESULT_DEPS = $(SRC_DIR)/storage.c $(SRC_DIR)/parser.c
+BPTREE_TEST_TARGET = test_bptree
+BPTREE_TEST_DEPS = $(SRC_DIR)/bptree.c
 
 TARGET  = sqlparser
 TEST_TARGET = test_runner
@@ -39,7 +41,7 @@ BENCH_SRCS = $(BENCH_DIR)/benchmark.c \
              $(SRC_DIR)/sql_format.c \
              $(SRC_DIR)/executor.c
 
-.PHONY: all clean test valgrind test_storage_all bench
+.PHONY: all clean test valgrind test_storage_all test_bptree bench
 
 all: $(TARGET)
 
@@ -67,9 +69,14 @@ test_storage_select_result: $(TEST_DIR)/test_storage_select_result.c $(SELECT_RE
 
 test_storage_all: $(STORAGE_TEST_TARGETS)
 
+test_bptree: $(TEST_DIR)/test_bptree.c $(BPTREE_TEST_DEPS)
+	$(CC) $(CFLAGS) -o $@ $^
+	./$@
+
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
 	$(MAKE) test_storage_all
+	$(MAKE) test_bptree
 
 valgrind: $(TARGET)
 	valgrind --leak-check=full --error-exitcode=1 ./$(TARGET) $(SQL)
@@ -81,7 +88,7 @@ $(BENCH_TARGET): $(BENCH_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 clean:
-	rm -f $(TARGET) $(TEST_TARGET) $(STORAGE_TEST_TARGETS) $(BENCH_TARGET)
+	rm -f $(TARGET) $(TEST_TARGET) $(STORAGE_TEST_TARGETS) $(BPTREE_TEST_TARGET) $(BENCH_TARGET)
 	rm -f data/*.csv data/*.schema
 	rm -f data/schema/*.schema data/tables/*.csv data/tables/*.csv.tmp
 
