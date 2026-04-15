@@ -241,11 +241,14 @@ let benchChart = null;
 
 const _chartOpts = (title, unit) => ({
   responsive: true,
+  // 부모 컨테이너를 꽉 채우도록 비율 유지 해제 (카드가 왼쪽으로 압축돼 보이던 원인)
+  maintainAspectRatio: false,
   plugins: {
     legend: { display: false },
     title: {
       display: true, text: title, color: "#fff",
-      font: { size: 13, weight: 600, family: "'Inter', sans-serif" },
+      font: { size: 14, weight: 600, family: "'Inter', sans-serif" },
+      padding: { top: 2, bottom: 14 },
     },
   },
   scales: {
@@ -381,11 +384,13 @@ function parseBptree(text) {
     nodes.push({ depth, type, keys });
   }
   // depth 기반으로 트리 재구성 (stack)
+  // 주의: pop 조건은 "len >= depth" 여야 형제/조카 관계가 올바름.
+  //   (같은 depth 가 이미 stack 에 있으면 그것부터 pop 해야 함)
   const stack = [];
   let root = null;
   for (const n of nodes) {
     const node = { type: n.type, keys: n.keys, children: [] };
-    while (stack.length > n.depth) stack.pop();
+    while (stack.length >= n.depth) stack.pop();
     if (stack.length === 0) {
       root = node;
     } else {
@@ -459,20 +464,35 @@ function renderTreeSvg(tree) {
     leafLinks += `<path class="tree-leaf-link" d="M${a.x + a.width},${ay} L${b.x},${ay}"/>`;
   }
 
-  // 노드 렌더 (애니메이션 stagger)
+  // 노드 렌더 (애니메이션 stagger + data-nid 로 노드 ↔ SVG 매핑)
   let nodeG = "";
   allNodes.forEach((n, i) => {
+    n._id = i;
     const y = PAD_Y + n.depth * LEVEL_GAP_Y;
     const cls = n.depth === 0 ? "tree-node-root"
       : n.type === "LEAF" ? "tree-node-leaf"
       : "tree-node-internal";
     const label = n.keys.join(", ");
-    nodeG += `<g class="${cls} tree-anim-in" style="animation-delay:${(i * 60)}ms">
+    nodeG += `<g class="${cls} tree-anim-in" data-nid="${i}" style="animation-delay:${(i * 60)}ms">
       <rect x="${n.x}" y="${y}" width="${n.width}" height="${NODE_H}" rx="6"/>
       <text x="${n.x + n.width / 2}" y="${y + NODE_H / 2 + 5}"
             text-anchor="middle" font-family="'JetBrains Mono',monospace" font-size="12">${label}</text>
     </g>`;
   });
+
+  // search 가 사용할 수 있도록 전역 상태 업데이트 — 렌더 후 DOM 에서 실제 요소를 찾아 Map 생성
+  setTimeout(() => {
+    _lastRenderedTree = tree;
+    const svg = document.querySelector("#tree-svg-wrap svg");
+    if (!svg) return;
+    _nodeIndexById = new Map();
+    function walk(n) {
+      const el = svg.querySelector(`g[data-nid="${n._id}"]`);
+      if (el) _nodeIndexById.set(n, el);
+      for (const c of n.children) walk(c);
+    }
+    walk(tree);
+  }, 10);
 
   return `<svg id="tree-svg" viewBox="0 0 ${Math.max(totalW, 600)} ${totalH}"
                width="${Math.max(totalW, 600)}" height="${totalH}">
@@ -571,26 +591,88 @@ async function playInsertAnimation(raw, wrap) {
   }
 }
 
-/* 트리 내 특정 key 경로 하이라이트 (C 인사이트 CTA) */
+/* 트리 내 특정 key 경로 시각화 — 실제 B+ 트리 탐색 로직 */
+let _lastRenderedTree = null;
+let _nodeIndexById = null;  // 노드 → SVG g 요소 인덱스
+
+function searchPath(tree, target) {
+  /* B+ 트리 탐색 규칙:
+   * INT[k0, k1, ..., k_{m-1}] 는 m+1 개 자식을 가리킴.
+   * keys[i] 는 "child[i+1] 의 최소 키". 즉:
+   *   target <  keys[0] → child[0]
+   *   keys[0] <= target < keys[1] → child[1]
+   *   ...
+   *   target >= keys[m-1] → child[m]
+   * 따라서 "target < keys[i] 인 가장 작은 i" 가 목적지. 없으면 last child. */
+  const path = [];  // [{node, why}]
+  function descend(node) {
+    path.push({ node, why: null });
+    if (!node.children.length) return;
+    const keys = node.keys.map(Number);
+    let idx = keys.findIndex(k => target < k);
+    if (idx < 0) idx = node.children.length - 1;
+    path[path.length - 1].why = idx < keys.length
+      ? `${target} < ${keys[idx]} → child[${idx}]`
+      : `${target} ≥ ${keys[keys.length - 1]} → child[${idx}] (끝)`;
+    descend(node.children[idx]);
+  }
+  descend(tree);
+  const leaf = path[path.length - 1].node;
+  const found = leaf.keys.map(Number).includes(target);
+  return { path, found, leaf };
+}
+
+function formatTrace(target, result) {
+  const lines = [];
+  lines.push(`<b style="color:var(--red)">bptree_search(${target})</b> 경로:`);
+  result.path.forEach((p, i) => {
+    const pad = "&nbsp;".repeat(i * 3);
+    const typ = p.node.children.length === 0 ? "LEAF" : (i === 0 ? "루트" : "INT");
+    const keysStr = p.node.keys.join(", ");
+    const arrow = p.why ? `<span style="color:var(--grey-40)"> — ${p.why}</span>` : "";
+    lines.push(`${pad}→ ${typ}[${keysStr}]${arrow}`);
+  });
+  lines.push(`<span style="color:${result.found ? "#00b450" : "var(--red)"};font-weight:600">
+    ${result.found ? "✓" : "✗"} id=${target} ${result.found ? "발견" : "없음"}
+  </span>`);
+  return lines.join("<br/>");
+}
+
 $("#btn-tree-search").addEventListener("click", () => {
   const svg = document.querySelector("#tree-svg-wrap svg");
-  if (!svg) { log("먼저 트리를 그려주세요"); return; }
-  // 단순 데모: 모든 노드를 순차적으로 pulse 로 하이라이트 (루트→중간→리프)
-  const groups = [...svg.querySelectorAll("g.tree-node-root, g.tree-node-internal, g.tree-node-leaf")];
-  groups.forEach(g => g.classList.remove("tree-highlight"));
-  // 레벨별로 하나씩 선택해 stagger
-  const levels = { root: [], internal: [], leaf: [] };
-  for (const g of groups) {
-    if (g.classList.contains("tree-node-root")) levels.root.push(g);
-    else if (g.classList.contains("tree-node-internal")) levels.internal.push(g);
-    else levels.leaf.push(g);
+  const trace = $("#search-trace");
+  if (!svg || !_lastRenderedTree) {
+    if (trace) trace.innerHTML = `<span style="color:var(--grey-60)">먼저 '트리 그리기' 로 트리를 생성해주세요.</span>`;
+    log("먼저 트리를 그려주세요");
+    return;
   }
-  const pickMiddle = (arr) => arr[Math.floor(arr.length / 2)];
-  const path = [pickMiddle(levels.root), pickMiddle(levels.internal), pickMiddle(levels.leaf)].filter(Boolean);
-  path.forEach((g, i) => {
-    setTimeout(() => g.classList.add("tree-highlight"), i * 400);
+  const target = parseInt($("#tree-search-target").value);
+  if (!Number.isFinite(target)) {
+    if (trace) trace.innerHTML = `<span style="color:var(--red)">유효한 id 를 입력하세요.</span>`;
+    return;
+  }
+  const result = searchPath(_lastRenderedTree, target);
+
+  // 초기화
+  svg.querySelectorAll(".tree-highlight, .is-path").forEach(el => {
+    el.classList.remove("tree-highlight");
+    el.classList.remove("is-path");
   });
-  log(`트리 탐색 경로 시각화: ${path.length} 레벨`);
+
+  // 노드 및 엣지 stagger 하이라이트
+  result.path.forEach((p, i) => {
+    setTimeout(() => {
+      const el = _nodeIndexById?.get(p.node);
+      if (el) el.classList.add("tree-highlight");
+      if (i > 0) {
+        const prev = _nodeIndexById?.get(result.path[i - 1].node);
+        // 엣지는 ID 부여 안 함 — highlight 는 노드 단에서만
+      }
+    }, i * 450);
+  });
+
+  if (trace) trace.innerHTML = formatTrace(target, result);
+  log(`탐색: id=${target} → ${result.path.length} 레벨 → ${result.found ? "발견" : "없음"}`);
 });
 
 function countLeaves(t) {
