@@ -591,6 +591,30 @@ static void test_json_where_and(void) {
     free(s);
 }
 
+static void test_where_between_basic(void) {
+    SECTION("WHERE: BETWEEN 기본");
+    ParsedSQL *s = parse_sql("SELECT * FROM t WHERE id BETWEEN 10 AND 20");
+    CHECK(s != NULL, "parse_sql NULL");
+    CHECK(s->where_count == 1, "where_count == 1");
+    CHECK(strcmp(s->where[0].column, "id") == 0, "column == id");
+    CHECK(strcmp(s->where[0].op, "BETWEEN") == 0, "op normalize BETWEEN");
+    CHECK(strcmp(s->where[0].value, "10") == 0, "value == 10 (low)");
+    CHECK(strcmp(s->where[0].value_to, "20") == 0, "value_to == 20 (high)");
+    free_parsed(s);
+}
+
+static void test_where_between_with_and_clause(void) {
+    SECTION("WHERE: BETWEEN ... AND 다음 조건");
+    ParsedSQL *s = parse_sql(
+        "SELECT * FROM t WHERE id BETWEEN 1 AND 5 AND name = 'alice'");
+    CHECK(s->where_count == 2, "where_count == 2 (BETWEEN 의 AND 는 소비, 뒤 AND 는 결합자)");
+    CHECK(strcmp(s->where[0].op, "BETWEEN") == 0, "w[0].op");
+    CHECK(strcmp(s->where[0].value_to, "5") == 0, "w[0].value_to == 5");
+    CHECK(strcmp(s->where[1].column, "name") == 0, "w[1].column");
+    CHECK(strcmp(s->where[1].value, "alice") == 0, "w[1].value");
+    free_parsed(s);
+}
+
 static void test_json_where_links(void) {
     SECTION("JSON: WHERE mixed links");
     char *s = capture_json("SELECT * FROM t WHERE a = 1 AND b = 2 OR c = 3");
@@ -767,6 +791,8 @@ int main(void) {
     test_json_insert();
     test_json_where_and();
     test_json_where_links();
+    test_where_between_basic();
+    test_where_between_with_and_clause();
     test_json_escape();
     test_json_null_safe();
 

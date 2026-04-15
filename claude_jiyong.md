@@ -174,9 +174,34 @@ fix(bptree): split 후 부모 키 업데이트 버그 수정
 - [ ] 100만 건 테스트 통과
 - [ ] 5개 바이너리 valgrind 누수 0
 
-### 최종 (21:00)
-- [ ] dev → main PR + 머지
-- [ ] README 최종 수치 업데이트
+### 최종 (21:00) — **Round 1 완료 (2026-04-15)**
+- [x] dev → main PR + 머지 (PR #18)
+- [x] README 최종 수치 업데이트 (PR #17)
+
+### Round 2 — BETWEEN + DELETE/UPDATE 인덱스 동기화
+
+**내 작업 순서:**
+
+1. **PR A (Phase 1 선행, 블로커 제거)** — 지금 진행 중 (`chore/round2-plan-and-interface`)
+   - `include/types.h`: `WhereClause.value_to[256]`, `storage_select_result_by_row_indices` 선언 추가
+   - `src/parser.c`: `BETWEEN A AND B` 파싱 → op="BETWEEN", value=A, value_to=B
+   - `tests/test_parser.c`: BETWEEN 파싱 테스트 2건
+   - CLAUDE.md / agent.md / claude_jiyong.md / README 업데이트
+   - → 머지 후 정환·민철 착수 공지
+
+2. **PR B (비교 벤치)**
+   - `bench/benchmark.c`: 같은 데이터셋에서 선형 탐색 vs B+ 트리 조회 시간 비교
+   - README 표에 "배율" 컬럼 추가
+
+3. **PR C (Mix merge)**
+   - 정환 `feature/executor-between` + 민철 `feature/storage-index-sync` 도착 시 Mix merge
+   - CI green → dev 머지
+
+4. **최종 dev → main** — 규태 MP5 머지 후
+
+### PR 지시/관리 루틴
+- 매 PR 에 사후 리뷰 코멘트 (잘된 점 + 개선점) 작성 — Round 1 에서 놓쳤던 부분 보완
+- 팀원 작업 동기: **"Phase 1 PR(내 단독) 머지되면 즉시 Slack 공지"**
 
 ### MP5 — 웹 데모 (선택, 발표 전)
 

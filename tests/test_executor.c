@@ -607,6 +607,148 @@ static int test_execute_select_where_id_missing_prints_empty_result(void)
     return 0;
 }
 
+static int test_execute_select_where_id_between_uses_range_path(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "BETWEEN");
+    strcpy(sql->where[0].value, "2");
+    strcpy(sql->where[0].value_to, "3");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture BETWEEN range SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Bob | 24") ||
+        !contains_text(output, "Chloe | 27") ||
+        !contains_text(output, "(2 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("BETWEEN range query did not return the expected rows.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_where_id_between_includes_boundaries(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "BETWEEN");
+    strcpy(sql->where[0].value, "1");
+    strcpy(sql->where[0].value_to, "4");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture BETWEEN boundary SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Alice | 29") ||
+        !contains_text(output, "Dylan | 31") ||
+        !contains_text(output, "(4 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("BETWEEN boundary query did not include both endpoints.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_where_id_between_missing_prints_empty_result(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    if (seed_users_index() != 0) {
+        fail_test("Failed to seed users index.");
+        return 1;
+    }
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "BETWEEN");
+    strcpy(sql->where[0].value, "100");
+    strcpy(sql->where[0].value_to, "120");
+
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture empty BETWEEN SELECT output.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "(0 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Missing BETWEEN query did not preserve empty-result formatting.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
 int run_executor_tests(void)
 {
     int status;
@@ -657,6 +799,21 @@ int run_executor_tests(void)
     }
 
     if (test_execute_select_where_id_missing_prints_empty_result() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_between_uses_range_path() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_between_includes_boundaries() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_between_missing_prints_empty_result() != 0) {
         status = 1;
         goto cleanup;
     }

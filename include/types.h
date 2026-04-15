@@ -69,8 +69,9 @@ typedef struct {
  */
 typedef struct {
     char column[64];       /* 비교할 컬럼 이름 (예: "age") */
-    char op[8];            /* 비교 연산자  (예: ">", "=", "!=") */
-    char value[256];       /* 비교할 값    (예: "20", "alice") */
+    char op[8];            /* 비교 연산자  (예: ">", "=", "!=", "BETWEEN") */
+    char value[256];       /* 비교할 값    (예: "20", "alice"; BETWEEN 의 하한) */
+    char value_to[256];    /* BETWEEN 상한 값. 그 외 연산자에서는 빈 문자열. */
 } WhereClause;
 
 /* ─── ORDER BY ───────────────────────────────────────────────── */
@@ -222,6 +223,9 @@ int        storage_create(const char *table, char **col_defs, int count);
 int  storage_select_result(const char *table, ParsedSQL *sql, RowSet **out);
 int  storage_select_result_by_row_index(const char *table, ParsedSQL *sql,
                                         int row_index, RowSet **out);
+int  storage_select_result_by_row_indices(const char *table, ParsedSQL *sql,
+                                          const int *row_indices, int count,
+                                          RowSet **out);
 void print_rowset(FILE *out, const RowSet *rs);
 void rowset_free(RowSet *rs);
 

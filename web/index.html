@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MiniSQL — B+Tree Index</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   MiniSQL — Porsche Design Language
+   Font: Inter (closest open alternative to Porsche Next)
+   Colors: Porsche palette — #0e0e12, #fff, #d5001c
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  --black:    #0e0e12;
+  --white:    #ffffff;
+  --red:      #d5001c;
+  --grey-10:  #eeeff2;
+  --grey-20:  #e3e4e8;
+  --grey-40:  #b0b1b6;
+  --grey-60:  #7c7d82;
+  --grey-80:  #4a4b50;
+  --surface:  #f7f7f8;
+  --font:     'Inter', 'Arial Narrow', Arial, sans-serif;
+  --mono:     'JetBrains Mono', monospace;
+  --ease:     cubic-bezier(.25,.1,.25,1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  background: var(--black);
+  color: var(--white);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  min-width: 320px;
+}
+
+/* ═══════ GRID — Porsche 12-col ═══════════════════════════════ */
+.grid {
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 0 clamp(24px, 3vw, 80px);
+}
+
+/* ═══════ NAV ═════════════════════════════════════════════════ */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  height: 73px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 clamp(24px, 3vw, 80px);
+  background: rgba(14,14,18,0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  transition: background 0.4s var(--ease);
+}
+.nav-left { display: flex; align-items: center; gap: 24px; }
+.nav-menu {
+  font-size: 16px; font-weight: 500; color: var(--white);
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font);
+}
+.nav-menu-icon {
+  width: 18px; height: 12px;
+  display: flex; flex-direction: column; justify-content: space-between;
+}
+.nav-menu-icon span {
+  display: block; height: 1.5px; background: var(--white);
+  border-radius: 1px;
+}
+.nav-brand {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 4px; text-transform: uppercase;
+  color: var(--white);
+  position: absolute; left: 50%; transform: translateX(-50%);
+}
+
+/* ═══════ HERO ════════════════════════════════════════════════ */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  justify-content: center;
+  padding: 120px clamp(24px, 3vw, 80px) clamp(80px, 12vh, 160px);
+  background: var(--black);
+  overflow: hidden;
+}
+/* subtle radial glow behind the text */
+.hero::before {
+  content: '';
+  position: absolute;
+  width: 120%; height: 120%;
+  top: -10%; left: -10%;
+  background: radial-gradient(ellipse at 30% 50%,
+    rgba(213,0,28,0.04) 0%,
+    transparent 60%);
+  pointer-events: none;
+}
+.hero-label {
+  font-size: clamp(12px, 1vw, 14px);
+  font-weight: 400; color: var(--grey-40);
+  margin-bottom: clamp(12px, 2vh, 24px);
+  position: relative;
+}
+.hero-title {
+  font-size: clamp(40px, 7vw, 96px);
+  font-weight: 600; line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--white);
+  max-width: 800px;
+  position: relative;
+}
+.hero-title .red { color: var(--red); }
+.hero-desc {
+  margin-top: clamp(16px, 3vh, 32px);
+  font-size: clamp(14px, 1.2vw, 18px);
+  font-weight: 300; line-height: 1.6;
+  color: var(--grey-40);
+  max-width: 460px;
+  position: relative;
+}
+/* Porsche-style "Discover now" link */
+.hero-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: clamp(24px, 4vh, 48px);
+  font-size: 16px; font-weight: 500;
+  color: var(--white); text-decoration: none;
+  border: 1px solid var(--white);
+  border-radius: 8px; padding: 10px 24px;
+  transition: all 0.25s var(--ease);
+  position: relative; cursor: pointer;
+  background: none; font-family: var(--font);
+}
+.hero-cta:hover {
+  background: var(--white); color: var(--black);
+}
+/* scroll down arrow */
+.hero-arrow {
+  position: absolute;
+  bottom: clamp(32px, 5vh, 56px);
+  left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center;
+}
+.hero-arrow svg {
+  width: 20px; height: 20px;
+  stroke: var(--grey-40); stroke-width: 1.5;
+  fill: none;
+  animation: arrowBounce 2s ease-in-out infinite;
+}
+@keyframes arrowBounce {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(6px); opacity: 1; }
+}
+
+/* ═══════ SECTION — white bg panels ═══════════════════════════ */
+.section-white {
+  background: var(--white); color: var(--black);
+  padding: clamp(48px, 8vh, 96px) 0;
+}
+.section-dark {
+  background: var(--black); color: var(--white);
+  padding: clamp(48px, 8vh, 96px) 0;
+}
+
+/* ═══════ SCENARIO — full width white ═════════════════════════ */
+.scenario-block {
+  background: var(--white); color: var(--black);
+  padding: clamp(64px, 10vh, 120px) 0;
+}
+.scenario-text {
+  font-size: clamp(20px, 2.8vw, 40px);
+  font-weight: 300; line-height: 1.5;
+  max-width: 760px;
+}
+.scenario-text strong {
+  font-weight: 600; color: var(--black);
+}
+.scenario-text .red { color: var(--red); font-weight: 500; }
+.scenario-meta {
+  margin-top: clamp(16px, 2vh, 32px);
+  font-size: 13px; font-weight: 400;
+  color: var(--grey-60);
+  letter-spacing: 0.5px;
+}
+
+/* ═══════ SECTION HEADER ══════════════════════════════════════ */
+.sec-head {
+  margin-bottom: clamp(24px, 4vh, 48px);
+}
+.sec-head-label {
+  font-size: 13px; font-weight: 500;
+  color: var(--grey-60); letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.sec-head-title {
+  font-size: clamp(28px, 3.5vw, 48px);
+  font-weight: 600; line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.sec-head-title .red { color: var(--red); }
+
+/* ═══════ CARD ════════════════════════════════════════════════ */
+.card-porsche {
+  background: var(--surface);
+  border: 1px solid var(--grey-10);
+  border-radius: 12px;
+  padding: clamp(24px, 3vw, 40px);
+  transition: transform 0.4s var(--ease), box-shadow 0.4s var(--ease);
+}
+.card-porsche:hover {
+  transform: scale3d(1.01, 1.01, 1);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.06);
+}
+
+/* dark variant */
+.card-dark {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: clamp(24px, 3vw, 40px);
+  transition: transform 0.4s var(--ease), border-color 0.4s;
+}
+.card-dark:hover {
+  border-color: rgba(255,255,255,0.16);
+  transform: scale3d(1.01, 1.01, 1);
+}
+
+/* ═══════ CONTROLS ════════════════════════════════════════════ */
+.controls { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label {
+  font-size: 12px; font-weight: 500; color: var(--grey-60);
+}
+/* white bg input */
+.input-w {
+  font-family: var(--mono); font-size: 15px; font-weight: 400;
+  color: var(--black); background: var(--white);
+  border: 1px solid var(--grey-20); border-radius: 8px;
+  padding: 12px 16px; width: 150px;
+  transition: border-color 0.25s var(--ease);
+}
+.input-w:focus { outline: none; border-color: var(--black); }
+
+/* dark bg input */
+.input-d {
+  font-family: var(--mono); font-size: 15px; font-weight: 400;
+  color: var(--white); background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 8px;
+  padding: 12px 16px; width: 150px;
+  transition: border-color 0.25s var(--ease);
+}
+.input-d:focus { outline: none; border-color: var(--white); }
+
+/* ═══════ BUTTONS — Porsche exact ═════════════════════════════ */
+.btn {
+  font-family: var(--font);
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 24px;
+  font-size: 16px; font-weight: 500;
+  border-radius: 8px; cursor: pointer;
+  transition: all 0.25s var(--ease);
+  text-decoration: none;
+}
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* white border on dark bg */
+.btn-w-border {
+  background: transparent; color: var(--white);
+  border: 1px solid var(--white);
+}
+.btn-w-border:hover:not(:disabled) {
+  background: var(--white); color: var(--black);
+}
+
+/* dark border on white bg */
+.btn-d-border {
+  background: transparent; color: var(--black);
+  border: 1px solid var(--black);
+}
+.btn-d-border:hover:not(:disabled) {
+  background: var(--black); color: var(--white);
+}
+
+/* red filled */
+.btn-red {
+  background: var(--red); color: var(--white);
+  border: 1px solid var(--red);
+}
+.btn-red:hover:not(:disabled) {
+  background: #b8001a; border-color: #b8001a;
+}
+
+/* ═══════ STATUS ══════════════════════════════════════════════ */
+.status-text {
+  display: none; font-size: 14px; font-weight: 500;
+  color: var(--grey-60);
+}
+
+/* ═══════ TABLE ═══════════════════════════════════════════════ */
+.result-header {
+  font-size: 14px; font-weight: 500; color: var(--grey-60);
+  margin: 24px 0 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.table-wrap {
+  border: 1px solid var(--grey-10);
+  border-radius: 8px; overflow: hidden;
+}
+.table-wrap-dark {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; overflow: hidden;
+}
+table {
+  width: 100%; border-collapse: collapse;
+  font-family: var(--mono); font-size: 13px;
+}
+/* white variant */
+.table-wrap th {
+  padding: 12px 16px; text-align: left;
+  background: var(--surface); color: var(--grey-60);
+  font-family: var(--font); font-size: 12px; font-weight: 500;
+  border-bottom: 1px solid var(--grey-10);
+}
+.table-wrap td {
+  padding: 10px 16px; text-align: left;
+  border-bottom: 1px solid var(--grey-10); color: var(--black);
+}
+.table-wrap tbody tr:last-child td { border-bottom: none; }
+.table-wrap tbody tr:hover td { background: rgba(0,0,0,0.02); }
+
+/* dark variant */
+.table-wrap-dark th {
+  padding: 12px 16px; text-align: left;
+  background: rgba(255,255,255,0.03); color: var(--grey-40);
+  font-family: var(--font); font-size: 12px; font-weight: 500;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.table-wrap-dark td {
+  padding: 10px 16px; text-align: left;
+  border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--white);
+}
+.table-wrap-dark tbody tr:last-child td { border-bottom: none; }
+.table-wrap-dark tbody tr:hover td { background: rgba(255,255,255,0.02); }
+
+.more { color: var(--grey-60); font-size: 12px; margin-top: 10px; }
+.badge-fast {
+  display: inline-block; padding: 3px 12px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; font-family: var(--mono);
+  background: rgba(0,180,80,0.1); color: #00b450;
+}
+.badge-ok {
+  display: inline-block; padding: 3px 12px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; font-family: var(--mono);
+  background: rgba(213,0,28,0.08); color: var(--red);
+}
+
+/* ═══════ CHART ═══════════════════════════════════════════════ */
+.chart-area {
+  display: none; margin-top: 32px; max-width: 520px;
+}
+#compare-summary { margin-top: 24px; }
+.big-number {
+  font-size: clamp(48px, 6vw, 80px);
+  font-weight: 700; color: var(--red);
+  line-height: 1; letter-spacing: -0.03em;
+}
+.big-label {
+  font-size: 14px; font-weight: 400;
+  color: var(--grey-40); margin-top: 4px;
+}
+
+/* ═══════ LOG ═════════════════════════════════════════════════ */
+.log-outer {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; overflow: hidden;
+}
+#log {
+  background: rgba(255,255,255,0.02);
+  padding: 20px 24px;
+  font-family: var(--mono); font-size: 12px;
+  color: var(--grey-60); line-height: 2;
+  height: 180px; overflow-y: auto; white-space: pre-wrap;
+}
+
+/* ═══════ DIVIDER ═════════════════════════════════════════════ */
+.divider-light { border: none; border-top: 1px solid var(--grey-10); }
+.divider-dark { border: none; border-top: 1px solid rgba(255,255,255,0.06); }
+
+/* ═══════ FOOTER ══════════════════════════════════════════════ */
+.footer {
+  background: var(--black);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: clamp(32px, 5vh, 64px) 0;
+  text-align: center;
+  font-size: 12px; color: var(--grey-60);
+}
+
+/* ═══════ SCROLL REVEAL ═══════════════════════════════════════ */
+.reveal {
+  opacity: 0; transform: translateY(32px);
+  transition: opacity 0.8s var(--ease), transform 0.8s var(--ease);
+}
+.reveal.vis { opacity: 1; transform: none; }
+.reveal.d1 { transition-delay: 0.1s; }
+.reveal.d2 { transition-delay: 0.2s; }
+.reveal.d3 { transition-delay: 0.3s; }
+
+/* ═══════ RESPONSIVE ══════════════════════════════════════════ */
+@media (max-width: 760px) {
+  .controls { flex-direction: column; align-items: stretch; }
+  .input-w, .input-d { width: 100%; }
+  .nav-brand { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ NAV ═══ -->
+<nav class="nav">
+  <div class="nav-brand" style="position:static;transform:none">MINISQL</div>
+</nav>
+
+<!-- ═══ HERO — dark, Porsche style ═══ -->
+<section class="hero">
+  <div class="hero-label reveal">B+Tree Payment Log Engine</div>
+  <h1 class="hero-title reveal d1">
+    The new<br>
+    <span class="red">Index</span><br>
+    Query.
+  </h1>
+  <p class="hero-desc reveal d2">
+    수백만 건의 결제 로그에서 장애 구간만
+    O(log n + k)로 추출. 선형 대비 수백 배 단축.
+  </p>
+  <a class="hero-cta reveal d3" href="#scenario">Discover now</a>
+  <div class="hero-arrow">
+    <svg viewBox="0 0 20 20"><path d="M10 4 L10 16 M4 11 L10 17 L16 11" /></svg>
+  </div>
+</section>
+
+<!-- scenario removed -->
+<div id="scenario"></div>
+
+<!-- ═══ 01 · INJECT — white bg ═══ -->
+<section class="section-white">
+  <div class="grid">
+    <div class="sec-head reveal">
+      <div class="sec-head-label">01 &middot; Data Injection</div>
+      <h2 class="sec-head-title">더미 결제 데이터 <span class="red">주입.</span></h2>
+    </div>
+    <div class="card-porsche reveal d1">
+      <div class="controls">
+        <div class="field">
+          <span class="field-label">Records</span>
+          <input type="number" class="input-w" id="inject-count" value="100000" min="1000" max="1000000" step="10000" />
+        </div>
+        <button class="btn btn-d-border" id="btn-inject">Inject data</button>
+        <span id="inject-status" class="status-text"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="grid"><hr class="divider-light" /></div>
+
+<!-- ═══ 02 · RANGE — white bg ═══ -->
+<section class="section-white">
+  <div class="grid">
+    <div class="sec-head reveal">
+      <div class="sec-head-label">02 &middot; Range Query</div>
+      <h2 class="sec-head-title">장애 구간 <span class="red">조회.</span></h2>
+    </div>
+    <div class="card-porsche reveal d1">
+      <div class="controls">
+        <div class="field">
+          <span class="field-label">From ID</span>
+          <input type="number" class="input-w" id="range-lo" value="30000" />
+        </div>
+        <div class="field">
+          <span class="field-label">To ID</span>
+          <input type="number" class="input-w" id="range-hi" value="31500" />
+        </div>
+        <button class="btn btn-d-border" id="btn-range">Query</button>
+      </div>
+      <div id="range-result"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 03 · COMPARE — dark bg ═══ -->
+<section class="section-dark">
+  <div class="grid">
+    <div class="sec-head reveal">
+      <div class="sec-head-label" style="color:var(--grey-40)">03 &middot; Performance</div>
+      <h2 class="sec-head-title">선형 vs <span class="red">인덱스.</span></h2>
+    </div>
+    <div class="card-dark reveal d1">
+      <button class="btn btn-red" id="btn-compare">Compare</button>
+      <div id="compare-summary"></div>
+      <div class="chart-area" id="chart-area">
+        <canvas id="chart"></canvas>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ LOG — dark bg ═══ -->
+<section class="section-dark" style="padding-top:0">
+  <div class="grid">
+    <hr class="divider-dark" style="margin-bottom:clamp(32px,4vh,48px)" />
+    <div class="sec-head reveal">
+      <div class="sec-head-label" style="color:var(--grey-40)">System Log</div>
+    </div>
+    <div class="log-outer reveal d1">
+      <div id="log">Ready.\n</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ FOOTER ═══ -->
+<footer class="footer">
+  <div class="grid">
+    MiniSQL &middot; B+Tree Index &middot; Jungle 12th &middot; 2026
+  </div>
+</footer>
+
+<!-- ═══ SCROLL REVEAL ═══ -->
+<script>
+(function() {
+  var els = document.querySelectorAll('.reveal');
+  var io = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) { e.target.classList.add('vis'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.12 });
+  els.forEach(function(el) { io.observe(el); });
+})();
+</script>
+
+<script src="app.js"></script>
+</body>
+</html>

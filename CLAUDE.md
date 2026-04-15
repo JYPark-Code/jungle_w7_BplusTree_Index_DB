@@ -21,12 +21,48 @@ Week 6 SQL 처리기에 B+ 트리 인덱스를 추가하는 1일 스프린트.
 
 ## 그라운드 룰
 
-1. `include/types.h`, `include/bptree.h` **절대 수정 금지** — 인터페이스 계약 파일
+1. `include/bptree.h` **절대 수정 금지** — 인터페이스 계약 파일
+   - `include/types.h` 는 **PM(지용) 단독 PR로만** 수정 (팀원은 건드리지 않음)
 2. 커밋은 **Angular Commit Convention** 준수
 3. 기능 완성 후 **AI에게 unit test 작성 위임** → 테스트 통과 확인 후 PR
-4. 병렬 작업 가능하도록 담당 파일 외 수정 금지
-5. MP1(bptree.h 확정) 머지 전까지 본인 작업 시작 X
+4. 담당 파일 외 수정은 지양하되, **성능/기능상 불가피하면 허용** — 같은 파일에 두 팀원 PR이 오면 **PM이 Mix merge로 정리**
+   - 특히 `src/storage.c`, `src/executor.c` 는 executor/storage 양측이 공유하는 핫패스라 공동 편집 허용
+5. 선행 블로커(types.h/파서 확장) PR 머지 전까지 의존 작업 시작 X
 6. 막히면 1시간 이내 지용에게 알릴 것
+
+---
+
+## Round 2 (2026-04-15~) — BETWEEN 실행경로 + DELETE/UPDATE 인덱스 동기화
+
+Round 1 (MP1~MP4) 는 main 으로 배포 완료. Round 2 는 "발표 임팩트 + 안정성" 중심.
+
+### Phase 1 — 선행 블로커 (지용 단독 PR)
+- `include/types.h`: `WhereClause` 에 `value_to[256]` 추가 (BETWEEN 상한 값)
+- `include/types.h`: `storage_select_result_by_row_indices(table, sql, int* ids, int n, RowSet**)` 선언 추가
+- `src/parser.c`: `BETWEEN A AND B` 파싱 → `op="BETWEEN"`, `value=A`, `value_to=B` normalize
+- `tests/test_parser.c`: BETWEEN 파싱 테스트 1~2건
+
+### Phase 2 — 병렬 작업 (Mix merge 전제)
+
+| 담당 | 작업 | 건드리는 파일 | 브랜치 |
+|---|---|---|---|
+| **정환** | BETWEEN 실행 경로 (`executor_try_range_select` → `bptree_range` → `storage_select_result_by_row_indices`) + 테스트 | `src/executor.c`, `src/storage.c`(구현체), `tests/test_executor.c` | `feature/executor-between` |
+| **민철** | DELETE/UPDATE 시 인덱스 동기화 (현 라운드는 **인덱스 rebuild 방식**으로 안전하게, `bptree_delete` 신설은 보너스) + 테스트 | `src/storage.c`, `tests/test_storage_*.c` | `feature/storage-index-sync` |
+| **지용** | (1) Phase 1 선행, (2) 선형 vs 인덱스 **비교** 벤치 추가, (3) Mix merge | `bench/benchmark.c`, `README.md`, PM 영역 | `chore/round2-*` |
+| **규태** | MP5 웹 데모 진행 중 (병행, 본진 영향 없음) | `web/` | `feature/web-demo` |
+
+### Phase 3 — Mix merge + main 배포
+- 정환 PR + 민철 PR 받으면 지용이 Mix merge PR → dev
+- MP5 웹 데모 머지 후 dev → main 최종
+
+### Round 2 머지 포인트 (MP6~)
+| MP | 시점 | 조건 |
+|---|---|---|
+| **MP6** | Phase 1 | `include/types.h` 확장 + parser BETWEEN + 테스트 통과 머지 |
+| **MP7** | Phase 2 정환 PR | BETWEEN SELECT E2E 동작 + 테스트 통과 |
+| **MP8** | Phase 2 민철 PR | DELETE/UPDATE 후 `WHERE id=?` 조회 정합성 유지 |
+| **MP9** | Phase 3 | Mix merge + 선형 vs 인덱스 비교 벤치 수치 README 반영 |
+| **MP10** | 규태 MP5 | 웹 데모 완성 → dev → main
 
 ---
 

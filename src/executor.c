@@ -31,8 +31,12 @@
 #include <string.h>
 
 static int executor_try_indexed_select(const char *table, ParsedSQL *sql);
+static int executor_try_range_select(const char *table, ParsedSQL *sql);
+static int executor_should_use_id_range(const ParsedSQL *sql);
 static int executor_should_use_id_index(const ParsedSQL *sql);
 static int executor_parse_lookup_id(const WhereClause *where, int *out_id);
+static int executor_parse_between_bounds(const WhereClause *where, int *out_from, int *out_to);
+static int executor_parse_int_literal(const char *input, int *out_value);
 static void executor_print_rowset_and_free(RowSet *rs);
 static void executor_strip_optional_quotes(const char *input, char *output, size_t output_size);
 static char *executor_trim_whitespace(char *text);
@@ -54,9 +58,10 @@ void execute(ParsedSQL *sql) {
             break;
 
         case QUERY_SELECT:
-            /* WHERE id = ? 한정으로 B+트리 row index 조회를 먼저 시도한다.
-             * 그 외 모든 SELECT 는 기존 storage_select 선형 경로를 유지한다. */
-            if (executor_try_indexed_select(sql->table, sql) != 0) {
+            /* WHERE id BETWEEN ? AND ? 를 가장 먼저 시도하고,
+             * 그 다음 WHERE id = ? 단건 인덱스 경로를 탄다. */
+            if (executor_try_range_select(sql->table, sql) != 0 &&
+                executor_try_indexed_select(sql->table, sql) != 0) {
                 storage_select(sql->table, sql);
             }
             break;
@@ -75,6 +80,70 @@ void execute(ParsedSQL *sql) {
             fprintf(stderr, "[executor] unknown query type\n");
             break;
     }
+}
+
+static int executor_try_range_select(const char *table, ParsedSQL *sql)
+{
+    BPTree *tree;
+    RowSet *rs = NULL;
+    int from;
+    int to;
+    int *row_indices = NULL;
+    size_t capacity = 16U;
+    int count;
+
+    if (!executor_should_use_id_range(sql)) {
+        return -1;
+    }
+
+    if (executor_parse_between_bounds(&sql->where[0], &from, &to) != 0) {
+        return -1;
+    }
+
+    tree = index_registry_get(table);
+    if (tree == NULL) {
+        return -1;
+    }
+
+    row_indices = malloc(sizeof(*row_indices) * capacity);
+    if (row_indices == NULL) {
+        return -1;
+    }
+
+    for (;;) {
+        size_t new_capacity;
+        int *grown;
+
+        count = bptree_range(tree, from, to, row_indices, (int)capacity);
+        if ((size_t)count < capacity) {
+            break;
+        }
+
+        if (capacity > (size_t)INT_MAX / 2U) {
+            free(row_indices);
+            return -1;
+        }
+
+        new_capacity = capacity * 2U;
+        grown = realloc(row_indices, sizeof(*row_indices) * new_capacity);
+        if (grown == NULL) {
+            free(row_indices);
+            return -1;
+        }
+
+        row_indices = grown;
+        capacity = new_capacity;
+    }
+
+    if (storage_select_result_by_row_indices(table, sql, row_indices, count, &rs) != 0) {
+        free(row_indices);
+        rowset_free(rs);
+        return -1;
+    }
+
+    free(row_indices);
+    executor_print_rowset_and_free(rs);
+    return 0;
 }
 
 static int executor_try_indexed_select(const char *table, ParsedSQL *sql)
@@ -107,6 +176,19 @@ static int executor_try_indexed_select(const char *table, ParsedSQL *sql)
     return 0;
 }
 
+static int executor_should_use_id_range(const ParsedSQL *sql)
+{
+    const WhereClause *where;
+
+    if (sql == NULL || sql->where_count != 1 || sql->where == NULL) {
+        return 0;
+    }
+
+    where = &sql->where[0];
+    return executor_equals_ignore_case(where->column, "id") &&
+           executor_equals_ignore_case(where->op, "BETWEEN");
+}
+
 static int executor_should_use_id_index(const ParsedSQL *sql)
 {
     const WhereClause *where;
@@ -122,16 +204,50 @@ static int executor_should_use_id_index(const ParsedSQL *sql)
 
 static int executor_parse_lookup_id(const WhereClause *where, int *out_id)
 {
-    char literal[sizeof(where->value)];
-    char *trimmed;
-    char *end = NULL;
-    long parsed;
-
     if (where == NULL || out_id == NULL) {
         return -1;
     }
 
-    executor_strip_optional_quotes(where->value, literal, sizeof(literal));
+    return executor_parse_int_literal(where->value, out_id);
+}
+
+static int executor_parse_between_bounds(const WhereClause *where, int *out_from, int *out_to)
+{
+    int from;
+    int to;
+
+    if (where == NULL || out_from == NULL || out_to == NULL) {
+        return -1;
+    }
+
+    if (executor_parse_int_literal(where->value, &from) != 0 ||
+        executor_parse_int_literal(where->value_to, &to) != 0) {
+        return -1;
+    }
+
+    if (from > to) {
+        int temp = from;
+        from = to;
+        to = temp;
+    }
+
+    *out_from = from;
+    *out_to = to;
+    return 0;
+}
+
+static int executor_parse_int_literal(const char *input, int *out_value)
+{
+    char literal[256];
+    char *trimmed;
+    char *end = NULL;
+    long parsed;
+
+    if (input == NULL || out_value == NULL) {
+        return -1;
+    }
+
+    executor_strip_optional_quotes(input, literal, sizeof(literal));
     trimmed = executor_trim_whitespace(literal);
     if (trimmed[0] == '\0') {
         return -1;
@@ -151,7 +267,7 @@ static int executor_parse_lookup_id(const WhereClause *where, int *out_id)
         return -1;
     }
 
-    *out_id = (int)parsed;
+    *out_value = (int)parsed;
     return 0;
 }
 

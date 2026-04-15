@@ -75,6 +75,73 @@ static void bench_search(BPTree *tree, const int *keys, int n) {
            n, elapsed, n / elapsed, found);
 }
 
+/* 선형 탐색 vs B+ 트리 인덱스 비교.
+ * 같은 데이터셋 N 건에 대해 M 번 random id 조회를 두 방식으로 각각 수행.
+ *   - linear: (id, row_idx) 쌍 배열을 처음부터 순회하며 일치 확인 (O(n) per query)
+ *   - index:  bptree_search()                                     (O(log n) per query)
+ * 발표 "선형 대비 N배 단축" 수치의 근거. */
+static void bench_compare(BPTree *tree, const int *keys, int n) {
+    int m = 1000;
+    const char *env_m = getenv("BENCH_COMPARE_M");
+    if (env_m) {
+        int v = atoi(env_m);
+        if (v > 0) m = v;
+    }
+
+    /* 평탄 배열(선형 탐색 타겟) 구성 — 실제 CSV 풀스캔의 최소 모델 */
+    int *flat_ids  = malloc(sizeof(int) * (size_t)n);
+    int *flat_rows = malloc(sizeof(int) * (size_t)n);
+    int *probes    = malloc(sizeof(int) * (size_t)m);
+    if (!flat_ids || !flat_rows || !probes) {
+        fprintf(stderr, "[bench] malloc failed in compare\n");
+        free(flat_ids); free(flat_rows); free(probes);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        flat_ids[i]  = keys[i];
+        flat_rows[i] = i;
+    }
+    for (int i = 0; i < m; i++) {
+        probes[i] = keys[rand() % n];  /* 반드시 존재하는 id — worst case 는 아님 */
+    }
+
+    /* 1) 선형 탐색 */
+    int linear_hits = 0;
+    double t0 = now_sec();
+    for (int q = 0; q < m; q++) {
+        int target = probes[q];
+        for (int i = 0; i < n; i++) {
+            if (flat_ids[i] == target) {
+                linear_hits++;
+                (void)flat_rows[i];
+                break;
+            }
+        }
+    }
+    double linear_sec = now_sec() - t0;
+
+    /* 2) B+ 트리 인덱스 */
+    int index_hits = 0;
+    t0 = now_sec();
+    for (int q = 0; q < m; q++) {
+        if (bptree_search(tree, probes[q]) >= 0) index_hits++;
+    }
+    double index_sec = now_sec() - t0;
+
+    double speedup = (index_sec > 0.0) ? (linear_sec / index_sec) : 0.0;
+
+    printf("\n  [선형 vs 인덱스 비교]  N=%d, 조회 M=%d 회\n", n, m);
+    printf("  LINEAR  %.3f s  |  %.0f qps  (hits %d)\n",
+           linear_sec, m / linear_sec, linear_hits);
+    printf("  INDEX   %.3f s  |  %.0f qps  (hits %d)\n",
+           index_sec, m / index_sec, index_hits);
+    printf("  SPEEDUP %.1f x  (linear / index)\n", speedup);
+
+    free(flat_ids);
+    free(flat_rows);
+    free(probes);
+}
+
 static void bench_range(BPTree *tree, int n) {
     int buf_size = 1000;
     int *buf = malloc(sizeof(int) * (size_t)buf_size);
@@ -160,6 +227,9 @@ int main(void) {
 
     /* 3) RANGE 벤치마크 */
     bench_range(tree, n);
+
+    /* 4) 선형 vs 인덱스 비교 */
+    bench_compare(tree, keys, n);
 
     printf("\n=== Done ===\n");
 

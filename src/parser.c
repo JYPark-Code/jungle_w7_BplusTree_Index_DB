@@ -341,6 +341,20 @@ static void parse_where(TokenList *t, ParsedSQL *sql) {
         strncpy(w->column, col, sizeof(w->column) - 1);
         strncpy(w->op,     op,  sizeof(w->op) - 1);
         strncpy(w->value,  val, sizeof(w->value) - 1);
+        w->value_to[0] = '\0';
+
+        /* BETWEEN low AND high: 두 번째 값을 value_to 에 채우고 op 를 대문자로 normalize. */
+        if (ieq(op, "BETWEEN")) {
+            const char *and_tok = advance(t);
+            const char *high    = advance(t);
+            if (!and_tok || !ieq(and_tok, "AND") || !high) {
+                fprintf(stderr, "[parser] BETWEEN: expected 'BETWEEN low AND high'\n");
+                break;
+            }
+            strncpy(w->op, "BETWEEN", sizeof(w->op) - 1);
+            w->op[sizeof(w->op) - 1] = '\0';
+            strncpy(w->value_to, high, sizeof(w->value_to) - 1);
+        }
 
         /* 다음 토큰이 AND/OR 면 결합자를 저장하고 다음 조건을 계속 읽는다. */
         if (!peek(t) || (!ieq(peek(t), "AND") && !ieq(peek(t), "OR"))) {

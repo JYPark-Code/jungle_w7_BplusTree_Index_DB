@@ -29,13 +29,15 @@ make test    # 227 통과 확인
 
 ---
 
-## 그라운드 룰
+## 그라운드 룰 (Round 2 개정)
 
-1. `include/types.h`, `include/bptree.h` **수정 금지**
+1. `include/bptree.h` **수정 금지**
+   - `include/types.h` 는 **PM(지용) 단독 PR로만** 수정. 팀원은 건드리지 않음.
 2. Angular Commit Convention 준수
 3. 기능 완성 후 AI에게 unit test 생성 위임 → 통과 확인 후 PR
-4. 담당 파일 외 수정 금지 (병렬 작업 충돌 방지)
-5. MP1 머지 전 본인 작업 시작 X
+4. 담당 파일 외 수정 지양. 단 **성능/기능상 불가피 시 허용** → 같은 파일에 PR 2개 오면 **PM이 Mix merge로 정리**
+   - 특히 `src/storage.c`, `src/executor.c` 는 공동 편집 허용
+5. 선행 블로커(Phase 1) PR 머지 전 의존 작업 시작 X
 
 ---
 
@@ -258,8 +260,62 @@ UI 버튼 3개 (최소 구성):
 | **MP2** | 13:00 | `bptree_search` + `bptree_insert` (split 없이) 동작 → 정환/민철 실연결 |
 | **MP3** | 17:30 | split 완성 + 정환/민철 PR 머지 + 통합 빌드 227+ 통과 |
 | **MP4** | 20:30 | 100만 건 테스트 + valgrind 0 + 규태 PR 머지 |
-| **최종** | 21:00 | dev → main 머지 |
+| **최종** | 21:00 | dev → main 머지 **(Round 1 완료, PR #18)** |
 | **MP5** (선택) | 발표 전 | 규태 `feature/web-demo` PR 머지 — 본진 영향 0 확인 후에만 |
+
+### Round 2 (2026-04-15~)
+| MP | 조건 |
+|---|---|
+| **MP6** | Phase 1 — `include/types.h` (`WhereClause.value_to` + `storage_select_result_by_row_indices`) + parser BETWEEN + 테스트 머지 (지용 단독) |
+| **MP7** | 정환 PR — BETWEEN 실행 경로(`bptree_range` 연결) E2E 동작 |
+| **MP8** | 민철 PR — DELETE/UPDATE 인덱스 동기화 (rebuild 방식) |
+| **MP9** | 지용 Mix merge — 정환+민철 통합 + 선형 vs 인덱스 비교 벤치 README 반영 |
+| **MP10** | 규태 MP5 머지 → dev → main 최종 |
+
+---
+
+## Round 2 역할별 지시 (2026-04-15~)
+
+### 정환 — BETWEEN 실행 경로 (`feature/executor-between`)
+
+**선행 조건:** Phase 1 PR(지용) 머지 대기 → `include/types.h` 에 `WhereClause.value_to` 와 `storage_select_result_by_row_indices` 선언이 들어온 후 착수.
+
+**작업 범위:**
+- `src/executor.c`: `executor_try_range_select` 추가 — `where.op == "BETWEEN"` + `column == "id"` 감지 시 `bptree_range()` 로 id 배열 획득 → `storage_select_result_by_row_indices()` 호출 → `print_rowset`
+- 기존 `WHERE id = ?` 경로(`executor_try_indexed_select`)는 그대로, 순서: range 먼저 시도 → fallback 으로 indexed → fallback 으로 storage_select
+- `tests/test_executor.c`: `BETWEEN` 정상/경계/미존재 범위 3건 이상
+- `src/storage.c` 에 `storage_select_result_by_row_indices` 구현체 추가 가능 (민철과 공동 편집 허용 — Mix merge 예정)
+
+**에지 케이스:** `from > to` 정규화 / id 외 컬럼은 즉시 fallback / where_count != 1 fallback
+
+### 민철 — DELETE/UPDATE 인덱스 동기화 (`feature/storage-index-sync`)
+
+**선행 조건:** 없음 — 바로 착수 가능. 단 정환 PR 과 `src/storage.c` 영역 겹침 예상이라 개별 PR 후 PM Mix merge.
+
+**작업 범위:**
+- `src/storage.c`:
+  - `storage_delete` 성공 후 해당 테이블의 B+ 트리 전체 rebuild (CSV 재스캔 → 각 행 (id, row_idx) 로 `bptree_insert`). 기존 트리는 `bptree_destroy` + `index_registry_get_or_create` 재생성.
+  - `storage_update` 가 id 컬럼을 변경하는 경우도 동일하게 rebuild. id 불변이면 skip.
+  - `storage_meta_cache` 무효화 포함 (next_id / next_row_idx 재계산)
+- `tests/test_storage_delete.c`, `tests/test_storage_update.c`: DELETE/UPDATE 후 `bptree_search(id)` 가 올바른 row_idx 반환하는지 / 사라진 id 는 -1 인지
+
+**대안 (보너스, 여력 있으면):** `bptree_delete(tree, id)` 를 `src/bptree.c` 에 추가 (지용 영역이라 사전 합의 필요 — 1차는 rebuild 로 안전하게)
+
+### 지용 — Phase 1 선행 + 비교 벤치 + Mix merge
+
+**PR 1 (Phase 1):**
+- `include/types.h` 확장, `src/parser.c` BETWEEN 파싱, `tests/test_parser.c` 추가
+
+**PR 2 (비교 벤치):**
+- `bench/benchmark.c` 에 선형 탐색 루프 추가 — 같은 N 건에서 "name 컬럼 선형 탐색" vs "id 컬럼 B+ 트리" 시간 비교 출력
+- `README.md` 성능 표에 "선형 vs 인덱스 배율" 컬럼 추가
+
+**PR 3 (Mix merge):**
+- 정환 PR + 민철 PR 받아 Mix merge 브랜치 → dev
+
+### 규태 — MP5 웹 데모 (`feature/web-demo`)
+
+**변경 없음** — Round 1 기준 지시서(`CLAUDE.md` 웹 데모 섹션) 그대로. Round 2 본진 작업과 독립. Phase 1 머지 후 BETWEEN 이 실제로 SQL 로 뚫리면 시연 임팩트가 커짐.
 
 ---
 
@@ -308,29 +364,33 @@ scope 예시: `bptree`, `executor`, `storage`, `bench`, `makefile`
 
 ---
 
-## 파일 소유권 (충돌 방지)
+## 파일 소유권 (Round 2 개정)
 
 | 파일 | 소유자 | 타인 수정 |
 |---|---|---|
 | `src/bptree.c` | 지용 | ❌ |
-| `include/bptree.h` | 지용 (MP1 확정) | ❌ |
-| `src/executor.c` | 정환 | ❌ |
-| `src/storage.c` | 민철 | ❌ |
-| `bench/benchmark.c` | 규태 | ❌ |
-| `web/` (전체) | 규태 (보너스) | ❌ |
+| `include/bptree.h` | 지용 (수정 금지) | ❌ |
+| `src/executor.c` | 정환 (1차), **공동 편집 허용** | 🟢 Mix merge |
+| `src/storage.c` | 민철 (1차), **공동 편집 허용** | 🟢 Mix merge |
+| `bench/benchmark.c` | 규태 (1차) / 지용 (비교 벤치 추가) | 🟡 공유 |
+| `web/` (전체) | 규태 (MP5) | ❌ |
 | `src/json_out.c` | 정환 (출력 스키마 변경 시 규태에 공유) | 🟡 |
-| `include/types.h` | 전원 수정 금지 | ❌ |
-| `Makefile` | 지용 (각자 필요시 PR로 요청) | PR 경유 |
+| `include/types.h` | **지용 단독 PR로만 수정** | ❌ |
+| `src/parser.c` | 지용 | ❌ |
+| `Makefile` | 지용 | PR 경유 |
+
+**Round 2 공동 편집 규칙:** `executor.c` / `storage.c` 는 정환·민철이 동시에 수정 가능. 각자 PR 을 올리면 PM(지용)이 Mix merge 로 정리한다. 같은 함수를 건드리지 않도록 PR 본문에 건드린 함수명을 명시할 것.
 
 ---
 
-## 2차 리팩토링 (21:00~ 예비)
+## 2차 리팩토링 — Round 2 (공식화)
 
-시간이 남으면 아래 순서로 진행:
+Round 1 (MP1~MP4) 달성 후 아래 작업을 공식 Round 2 로 진행 (상단 "Round 2 역할별 지시" 참고):
 
-1. Range query — `WHERE id BETWEEN A AND B` (리프 linked list 활용)
-2. `bptree_print()` ASCII 시각화
-3. 레코드 수별 탐색 시간 측정 테이블 (10만/50만/100만)
+1. ✅ Range query — `WHERE id BETWEEN A AND B` (정환, MP7)
+2. ✅ DELETE/UPDATE 인덱스 동기화 (민철, MP8)
+3. ✅ 선형 vs 인덱스 비교 벤치 (지용, MP9)
+4. (여력) `bptree_print()` ASCII 시각화 demo, 레코드 수별 탐색 시간 테이블
 
 ---
 
