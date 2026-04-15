@@ -158,6 +158,9 @@ static int rowset_alloc(RowSet **out, int row_count, int col_count);
 static int count_csv_rows(const char *table_path);
 static void scan_csv_meta(const char *table_path, int id_col_index,
                            int *out_max_id, int *out_row_count);
+static void rebuild_index(const char *table, const char *table_path,
+                           int id_col_index);
+static void invalidate_meta_cache(const char *table);
 
 /* 테이블별 next_id / next_row_idx 메타 캐시.
  * INSERT 성공 시 두 값을 모두 +1 해서 다음 호출 때 CSV 풀스캔을 생략한다. */
@@ -405,6 +408,13 @@ int storage_delete(const char *table, ParsedSQL *sql)
     status = delete_rows_from_table(table_path, temp_path, schema, schema_count,
                                     sql);
 
+    /* DELETE 성공 시 B+ 트리 전체 rebuild + 메타 캐시 무효화 */
+    if (status == 0) {
+        int id_col_index = find_schema_index(schema, schema_count, "id");
+        invalidate_meta_cache(table);
+        rebuild_index(table, table_path, id_col_index);
+    }
+
 cleanup:
     free(schema);
     return status;
@@ -557,6 +567,86 @@ cleanup:
     return status;
 }
 
+int storage_select_result_by_row_indices(const char *table, ParsedSQL *sql,
+                                         const int *row_indices, int count,
+                                         RowSet **out)
+{
+    char schema_path[STORAGE_PATH_MAX];
+    char table_path[STORAGE_PATH_MAX];
+    ColDef *schema = NULL;
+    int schema_count = 0;
+    StorageRowBuffer rows = {0};
+    StorageRowBuffer selection = {0};
+    int index;
+    int status = -1;
+
+    if (out == NULL) {
+        fprintf(stderr, "storage_select_result_by_row_indices() received NULL out.\n");
+        return -1;
+    }
+    *out = NULL;
+
+    if (table == NULL || table[0] == '\0' || sql == NULL || count < 0 ||
+        (count > 0 && row_indices == NULL)) {
+        fprintf(stderr, "storage_select_result_by_row_indices() received invalid arguments.\n");
+        return -1;
+    }
+
+    if (build_schema_path(table, schema_path, sizeof(schema_path)) != 0 ||
+        build_table_path(table, table_path, sizeof(table_path)) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot build path for table '%s'\n", table);
+        return -1;
+    }
+
+    if (load_schema(schema_path, &schema, &schema_count) != 0) {
+        fprintf(stderr, "[storage] SELECT: table '%s' not found (schema missing)\n", table);
+        return -1;
+    }
+
+    if (load_table_rows(table_path, schema_count, &rows) != 0) {
+        fprintf(stderr, "[storage] SELECT: cannot read indexed rows for table '%s'\n", table);
+        goto cleanup;
+    }
+
+    selection.rows = NULL;
+    selection.count = 0;
+    selection.capacity = 0;
+    selection.row_width = rows.row_width;
+
+    for (index = 0; index < count; ++index) {
+        int row_index = row_indices[index];
+
+        if (row_index < 0 || row_index >= rows.count) {
+            continue;
+        }
+
+        if (append_row_buffer(&selection, rows.rows[row_index]) != 0) {
+            goto cleanup;
+        }
+    }
+
+    if (sort_selection(sql, schema, schema_count, &selection) != 0) {
+        goto cleanup;
+    }
+
+    if (sql->col_count == 1 && sql->columns != NULL) {
+        char fn[16];
+        char arg[64];
+        if (parse_aggregate_call(sql->columns[0], fn, sizeof(fn), arg, sizeof(arg)) == 0) {
+            status = build_rowset_for_aggregate(sql, schema, schema_count, &selection, out);
+            goto cleanup;
+        }
+    }
+
+    status = build_rowset_from_selection(sql, schema, schema_count, &selection, out);
+
+cleanup:
+    free_row_buffer(&selection, 0);
+    free_row_buffer(&rows, 1);
+    free(schema);
+    return status;
+}
+
 /* storage_select: 1주차 호환 wrapper.
  * storage_select_result 호출 → print_rowset 출력 → rowset_free.
  * 외부 동작은 1주차와 완전히 동일.
@@ -615,6 +705,14 @@ int storage_update(const char *table, ParsedSQL *sql)
 
     status = update_rows_from_table(table_path, temp_path, schema, schema_count,
                                     sql, set_indexes);
+
+    /* UPDATE 성공 시 B+ 트리 전체 rebuild + 메타 캐시 무효화
+     * id 컬럼 변경 여부와 무관하게 항상 rebuild (안전 우선). */
+    if (status == 0) {
+        int id_col_index = find_schema_index(schema, schema_count, "id");
+        invalidate_meta_cache(table);
+        rebuild_index(table, table_path, id_col_index);
+    }
 
 cleanup:
     free(set_indexes);
@@ -1104,6 +1202,62 @@ static void scan_csv_meta(const char *table_path, int id_col_index,
     fclose(fp);
     *out_max_id    = max_id;
     *out_row_count = row_count;
+}
+
+/* StorageMetaCache 에서 테이블 항목을 무효화한다.
+ * DELETE/UPDATE 후 CSV 상태가 바뀌므로 다음 INSERT 시 재스캔하도록 리셋. */
+static void invalidate_meta_cache(const char *table)
+{
+    int i;
+    for (i = 0; i < s_meta_count; ++i) {
+        if (strcmp(s_meta[i].table, table) == 0) {
+            s_meta[i].next_id      = 0;
+            s_meta[i].next_row_idx = 0;
+            return;
+        }
+    }
+}
+
+/* 해당 테이블의 B+ 트리를 완전 재구성한다.
+ * DELETE/UPDATE 성공 후 인덱스 정합성 보장을 위해 호출.
+ * bptree_delete 가 없으므로 레지스트리 전체를 초기화 후 현재 CSV 로 재등록. */
+static void rebuild_index(const char *table, const char *table_path,
+                           int id_col_index)
+{
+    BPTree *tree;
+    FILE *fp;
+    int row_idx = 0;
+    char *record = NULL;
+
+    if (id_col_index < 0) return;
+
+    /* 레지스트리 전체 초기화 후 이 테이블 트리 재생성.
+     * 다른 테이블의 트리는 다음 INSERT/SELECT 시 자동 재생성됨. */
+    index_registry_destroy_all();
+    tree = index_registry_get_or_create(table, 128);
+    if (tree == NULL) return;
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) return;
+
+    while (read_csv_record(fp, &record) == 1) {
+        char **fields = NULL;
+        int field_count = 0;
+        if (parse_csv_record(record, &fields, &field_count) == 0) {
+            if (id_col_index < field_count && fields[id_col_index] != NULL) {
+                int id = atoi(fields[id_col_index]);
+                if (id > 0) {
+                    bptree_insert(tree, id, row_idx);
+                }
+            }
+            free_string_array(fields, field_count);
+        }
+        free(record);
+        record = NULL;
+        row_idx++;
+    }
+
+    fclose(fp);
 }
 
 /* 입력: 테이블 CSV 경로, row 배열, row 길이

@@ -15,6 +15,8 @@
 #endif
 
 #include "types.h"
+#include "bptree.h"
+#include "index_registry.h"
 
 #define BUFFER_SIZE 4096
 #define PATH_SIZE 512
@@ -58,6 +60,7 @@ static int test_update_boolean_type_mismatch_fails(void);
 static int test_update_date_format_mismatch_fails(void);
 static int test_update_malformed_csv_fails(void);
 static int test_update_row_count_mismatch_fails(void);
+static int test_update_index_sync_row_idx_correct(void);
 
 #define ASSERT_TRUE(expr)                                                        \
     do {                                                                         \
@@ -101,6 +104,7 @@ int main(void)
         {"update date format mismatch fails", test_update_date_format_mismatch_fails},
         {"update malformed csv fails", test_update_malformed_csv_fails},
         {"update row count mismatch fails", test_update_row_count_mismatch_fails},
+        {"update index sync: row_idx correct after update", test_update_index_sync_row_idx_correct},
     };
     size_t i;
     int failed = 0;
@@ -775,6 +779,38 @@ static int test_update_row_count_mismatch_fails(void)
     status = 0;
 
 cleanup:
+    reset_test_environment();
+    return status;
+}
+
+/* ─── Week 7: UPDATE 후 B+ 트리 인덱스 동기화 테스트 ─────────── */
+
+/* UPDATE 후 트리의 row_idx 가 올바르게 유지되어야 한다. */
+static int test_update_index_sync_row_idx_correct(void)
+{
+    SetClause set = make_set("name", "updated");
+    WhereClause where = make_where("id", "=", "2");
+    BPTree *tree;
+    int status = 1;
+
+    reset_test_environment();
+    index_registry_destroy_all();
+    ASSERT_TRUE(prepare_table("users",
+                              "id,INT\nname,VARCHAR\n",
+                              "1,alice\n2,bob\n3,carol\n") == 0);
+
+    ASSERT_TRUE(call_storage_update("users", &set, 1, &where, 1, NULL, NULL) == 0);
+
+    tree = index_registry_get("users");
+    ASSERT_TRUE(tree != NULL);
+    /* row_idx 는 변경 없이 유지 */
+    ASSERT_TRUE(bptree_search(tree, 1) == 0);
+    ASSERT_TRUE(bptree_search(tree, 2) == 1);
+    ASSERT_TRUE(bptree_search(tree, 3) == 2);
+    status = 0;
+
+cleanup:
+    index_registry_destroy_all();
     reset_test_environment();
     return status;
 }
