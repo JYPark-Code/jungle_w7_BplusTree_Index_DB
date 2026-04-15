@@ -495,9 +495,14 @@ function renderTreeSvg(tree) {
     walk(tree);
   }, 10);
 
-  return `<svg id="tree-svg" viewBox="0 0 ${Math.max(totalW, 600)} ${totalH}"
-               width="${Math.max(totalW, 600)}" height="${totalH}">
-    ${edges}${leafLinks}${nodeG}
+  // 줌/팬 위해 전체를 #tree-root g 로 감싸 transform 의 단일 진실원 으로 둔다.
+  const w = Math.max(totalW, 600);
+  return `<svg id="tree-svg" viewBox="0 0 ${w} ${totalH}"
+               preserveAspectRatio="xMidYMid meet"
+               width="100%" height="100%">
+    <g id="tree-root" transform="translate(0,0) scale(1)">
+      ${edges}${leafLinks}${nodeG}
+    </g>
   </svg>`;
 }
 
@@ -760,3 +765,175 @@ function waitButtonReady(sel, maxWait = 300000) {
     }, 300);
   });
 }
+
+/* ── 6) Tree SVG 줌 / 팬 / 카메라 이동 ─────────────────────── */
+
+const _zoom = { s: 1, tx: 0, ty: 0 };
+
+function _treeRoot()    { return document.getElementById("tree-root"); }
+function _treeWrap()    { return document.getElementById("tree-svg-wrap"); }
+function _treeSvg()     { return document.getElementById("tree-svg"); }
+
+function applyTreeTransform() {
+  const root = _treeRoot();
+  if (!root) return;
+  root.setAttribute("transform",
+    `translate(${_zoom.tx},${_zoom.ty}) scale(${_zoom.s})`);
+}
+
+/* fit: 트리 BBox 를 컨테이너에 맞춰 90% 영역에 배치 */
+function fitTreeView() {
+  const root = _treeRoot();
+  const wrap = _treeWrap();
+  const svg  = _treeSvg();
+  if (!root || !wrap || !svg) return;
+  // SVG viewBox 좌표계로 BBox 를 받기 위해 transform 임시 reset
+  const prev = root.getAttribute("transform");
+  root.setAttribute("transform", "translate(0,0) scale(1)");
+  let bbox;
+  try { bbox = root.getBBox(); }
+  catch (e) { root.setAttribute("transform", prev || ""); return; }
+  // SVG viewBox 가 차지한 픽셀 폭/높이 계산 (svg.clientWidth = wrap 폭)
+  const cw = wrap.clientWidth;
+  const ch = wrap.clientHeight;
+  if (bbox.width <= 0 || bbox.height <= 0) {
+    root.setAttribute("transform", prev || "");
+    return;
+  }
+  // viewBox 좌표는 svg 내부 단위. transform 도 같은 단위.
+  // 컨테이너에 맞추려면 SVG 의 viewBox 와 동일 단위에서 scale 만 조정해도 됨
+  // (preserveAspectRatio meet 은 svg 자체가 이미 영역에 맞게 그려짐)
+  // → 여기서는 1.0 부근에서 살짝 키우는 정도가 자연스럽다.
+  const vb = svg.viewBox.baseVal;
+  const sx = (vb.width  * 0.95) / bbox.width;
+  const sy = (vb.height * 0.95) / bbox.height;
+  _zoom.s  = Math.max(0.2, Math.min(sx, sy));
+  _zoom.tx = (vb.width  - bbox.width  * _zoom.s) / 2 - bbox.x * _zoom.s;
+  _zoom.ty = (vb.height - bbox.height * _zoom.s) / 2 - bbox.y * _zoom.s;
+  applyTreeTransform();
+}
+
+function zoomTreeIn()  { _zoom.s = Math.min(_zoom.s * 1.3, 20); applyTreeTransform(); }
+function zoomTreeOut() { _zoom.s = Math.max(_zoom.s / 1.3, 0.05); applyTreeTransform(); }
+
+/* 노드 SVG element 를 화면 중앙으로 이동 + 자동 확대 */
+function panToTreeNode(nodeEl) {
+  if (!nodeEl) return;
+  const svg = _treeSvg();
+  if (!svg) return;
+  let bbox;
+  try { bbox = nodeEl.getBBox(); } catch (e) { return; }
+  const cx = bbox.x + bbox.width / 2;
+  const cy = bbox.y + bbox.height / 2;
+  const vb = svg.viewBox.baseVal;
+  const targetScale = Math.max(2.5, _zoom.s);
+  _zoom.s  = targetScale;
+  _zoom.tx = vb.width  / 2 - cx * targetScale;
+  _zoom.ty = vb.height / 2 - cy * targetScale;
+  const root = _treeRoot();
+  if (root) {
+    root.style.transition = "transform 320ms cubic-bezier(.25,.1,.25,1)";
+    applyTreeTransform();
+    setTimeout(() => { root.style.transition = ""; }, 360);
+  }
+}
+
+/* 트리 그려진 직후 호출 — 자동 fit + 줌/팬 핸들러 활성화 */
+function setupTreeZoomHandlers() {
+  const wrap = _treeWrap();
+  if (!wrap || wrap.dataset.zoomBound === "1") {
+    // 이미 바인딩됨 — 새 SVG 가 생겨도 상태만 reset 하면 됨
+    return;
+  }
+  wrap.dataset.zoomBound = "1";
+
+  // 휠 — 마우스 위치 기준 확대
+  wrap.addEventListener("wheel", (e) => {
+    if (!_treeRoot()) return;
+    e.preventDefault();
+    const svg = _treeSvg();
+    const rect = wrap.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    // 마우스 위치를 SVG viewBox 좌표로 변환
+    const mx = (e.clientX - rect.left) / rect.width  * vb.width;
+    const my = (e.clientY - rect.top)  / rect.height * vb.height;
+    const delta = e.deltaY < 0 ? 1.15 : 0.87;
+    _zoom.tx = mx - (mx - _zoom.tx) * delta;
+    _zoom.ty = my - (my - _zoom.ty) * delta;
+    _zoom.s  = Math.min(Math.max(_zoom.s * delta, 0.05), 20);
+    applyTreeTransform();
+  }, { passive: false });
+
+  // 드래그 팬
+  let drag = { active: false, sx: 0, sy: 0, tx0: 0, ty0: 0 };
+  wrap.addEventListener("mousedown", (e) => {
+    if (!_treeRoot()) return;
+    drag.active = true;
+    drag.sx = e.clientX; drag.sy = e.clientY;
+    drag.tx0 = _zoom.tx; drag.ty0 = _zoom.ty;
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag.active) return;
+    const svg = _treeSvg();
+    if (!svg) return;
+    const rect = wrap.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    const dx = (e.clientX - drag.sx) / rect.width  * vb.width;
+    const dy = (e.clientY - drag.sy) / rect.height * vb.height;
+    _zoom.tx = drag.tx0 + dx;
+    _zoom.ty = drag.ty0 + dy;
+    applyTreeTransform();
+  });
+  window.addEventListener("mouseup", () => { drag.active = false; });
+  wrap.addEventListener("mouseleave", () => { drag.active = false; });
+}
+
+// 버튼 와이어
+const _btnFit  = document.getElementById("btn-tree-fit");
+const _btnZin  = document.getElementById("btn-tree-zoomin");
+const _btnZout = document.getElementById("btn-tree-zoomout");
+if (_btnFit)  _btnFit.addEventListener("click", fitTreeView);
+if (_btnZin)  _btnZin.addEventListener("click", zoomTreeIn);
+if (_btnZout) _btnZout.addEventListener("click", zoomTreeOut);
+
+/* renderTreeSvg 가 호출된 후 자동 fit + 핸들러 바인딩.
+ * MutationObserver 로 #tree-svg-wrap 안에 svg 가 새로 들어올 때마다 트리거. */
+const _treeWrapObserverInit = () => {
+  const wrap = _treeWrap();
+  if (!wrap) return;
+  setupTreeZoomHandlers();
+  const obs = new MutationObserver(() => {
+    const svg = _treeSvg();
+    if (!svg) return;
+    // 새 SVG 가 들어왔으면 줌 상태 리셋 + 다음 tick 에 fit
+    _zoom.s = 1; _zoom.tx = 0; _zoom.ty = 0;
+    applyTreeTransform();
+    setTimeout(fitTreeView, 30);
+  });
+  obs.observe(wrap, { childList: true, subtree: false });
+};
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", _treeWrapObserverInit);
+} else {
+  _treeWrapObserverInit();
+}
+
+/* btn-tree-search 내부 stagger 에 panToTreeNode 추가용 — 기존 핸들러는 그대로
+ * 두고, search trace 로그 시 노드 element 를 잡아 카메라 이동만 wrap. */
+(function wrapSearchPan() {
+  const orig = document.getElementById("btn-tree-search");
+  if (!orig) return;
+  // 기존 click 리스너에 더해서 동일 input 으로 이어가는 'after' 훅 등록.
+  orig.addEventListener("click", () => {
+    const target = parseInt(document.getElementById("tree-search-target")?.value);
+    if (!Number.isFinite(target) || !_lastRenderedTree) return;
+    const result = searchPath(_lastRenderedTree, target);
+    // 노드 stagger 와 동일한 타이밍으로 카메라 이동
+    result.path.forEach((p, i) => {
+      setTimeout(() => {
+        const el = _nodeIndexById?.get(p.node);
+        if (el) panToTreeNode(el);
+      }, i * 450 + 80);  // 하이라이트 살짝 뒤 80ms 시점
+    });
+  });
+})();

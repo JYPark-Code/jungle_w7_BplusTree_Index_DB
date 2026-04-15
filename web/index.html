@@ -607,10 +607,36 @@ table {
   background: linear-gradient(180deg, #0a0a0d 0%, #14141a 100%);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 10px;
-  padding: 28px 20px;
-  overflow-x: auto;
-  min-height: 360px;
+  padding: 0;
+  overflow: hidden;             /* 줌·팬 시 외부 잘림 */
+  min-height: 420px;
+  height: 480px;
   display: flex; align-items: center; justify-content: center;
+  position: relative;
+  cursor: grab;
+  user-select: none;
+}
+.tree-svg-wrap:active { cursor: grabbing; }
+.tree-svg-wrap.placeholder { cursor: default; }
+.tree-svg-wrap > svg { width: 100%; height: 100%; }
+
+/* 줌 컨트롤 */
+.tree-zoom-controls {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: auto;
+}
+.zoom-btn {
+  font-family: var(--font); font-size: 13px; font-weight: 600;
+  padding: 8px 12px; min-width: 38px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: var(--white); border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+}
+.zoom-btn:hover { background: rgba(213,0,28,0.16); border-color: var(--red); }
+.zoom-hint {
+  font-size: 11.5px; color: var(--grey-60); margin-left: 4px;
 }
 .tree-svg-wrap.placeholder {
   color: var(--grey-60); font-style: italic;
@@ -1032,6 +1058,12 @@ table {
         </div>
         <button class="btn btn-red" id="btn-tree">트리 그리기</button>
         <button class="btn btn-d-border" id="btn-tree-play">▶ 삽입 애니메이션</button>
+        <div class="tree-zoom-controls">
+          <button class="zoom-btn" id="btn-tree-fit"  title="화면에 맞추기">fit</button>
+          <button class="zoom-btn" id="btn-tree-zoomin"  title="확대">＋</button>
+          <button class="zoom-btn" id="btn-tree-zoomout" title="축소">－</button>
+          <span class="zoom-hint">휠 = 확대 / 드래그 = 이동</span>
+        </div>
       </div>
 
       <div class="tree-help">
