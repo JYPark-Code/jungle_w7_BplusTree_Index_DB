@@ -109,8 +109,8 @@ function renderRangeResult(data) {
   let failSummary = "";
   if (failCount || timeoutCount) {
     failSummary = ` &nbsp;·&nbsp; <span style="color:var(--red);font-weight:600">⚠ 장애 ${failCount + timeoutCount}건</span>` +
-      (failCount ? ` <span style="color:var(--grey-20)">FAIL ${failCount}</span>` : "") +
-      (timeoutCount ? ` <span style="color:var(--grey-20)">TIMEOUT ${timeoutCount}</span>` : "");
+      (failCount ? ` <span style="color:var(--black)">FAIL ${failCount}</span>` : "") +
+      (timeoutCount ? ` <span style="color:var(--black)">TIMEOUT ${timeoutCount}</span>` : "");
   }
 
   let html = `<div class="result-header">
