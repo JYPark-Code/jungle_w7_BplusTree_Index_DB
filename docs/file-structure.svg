@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" font-family="ui-sans-serif, system-ui, sans-serif">
+  <!-- 흰 배경: GitHub 다크모드에서도 어두운 텍스트가 보이도록 고정 배경을 깔아둔다. -->
+  <rect x="0" y="0" width="1000" height="560" fill="#ffffff"/>
   <defs>
     <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
       <stop offset="0" stop-color="#fee2e2"/><stop offset="1" stop-color="#fecaca"/>

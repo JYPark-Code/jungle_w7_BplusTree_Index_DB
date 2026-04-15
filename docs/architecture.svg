@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="ui-sans-serif, system-ui, sans-serif">
+  <!-- 흰 배경: GitHub 다크모드에서도 어두운 텍스트가 보이도록 고정 배경을 깔아둔다. -->
+  <rect x="0" y="0" width="1000" height="620" fill="#ffffff"/>
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
