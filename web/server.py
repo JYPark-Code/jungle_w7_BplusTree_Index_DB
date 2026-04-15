@@ -159,8 +159,10 @@ def inject_payments(count: int = 100000) -> dict:
 
 
 def range_query(lo: int, hi: int) -> dict:
-    """id 범위 조회 — bptree_range 사용."""
-    sql = f"SELECT * FROM payments WHERE id >= {lo} AND id <= {hi};"
+    """id 범위 조회 — bptree_range 사용.
+    executor 는 where_count == 1 AND op == "BETWEEN" 에서만 B+ 트리 range 경로로
+    분기하므로, `>= AND <=` 가 아닌 BETWEEN 으로 보내야 O(log n + k) 가 실측된다. """
+    sql = f"SELECT * FROM payments WHERE id BETWEEN {lo} AND {hi};"
     t0 = time.monotonic()
     result = run_sql(sql, timeout=10)
     elapsed = (time.monotonic() - t0) * 1000
@@ -189,8 +191,8 @@ def range_query(lo: int, hi: int) -> dict:
 
 def compare_search(lo: int, hi: int) -> dict:
     """선형 vs 인덱스 비교. id 조건(인덱스) vs status 조건(선형)."""
-    # 인덱스 검색 (id range)
-    sql_index = f"SELECT * FROM payments WHERE id >= {lo} AND id <= {hi};"
+    # 인덱스 검색 (id BETWEEN — executor 가 bptree_range 경로로 분기하는 유일한 형태)
+    sql_index = f"SELECT * FROM payments WHERE id BETWEEN {lo} AND {hi};"
     t0 = time.monotonic()
     r1 = run_sql(sql_index, timeout=10)
     index_ms = (time.monotonic() - t0) * 1000
