@@ -9,5 +9,8 @@ test_storage_insert
 test_storage_delete
 test_storage_update
 test_storage_select_result
+test_bptree
+test_benchmark
+benchmark
 data/
 CLAUDE_jiyong.md

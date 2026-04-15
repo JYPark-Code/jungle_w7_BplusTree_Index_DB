@@ -37,6 +37,9 @@ static int test_insert_unknown_column_fails(void);
 static int test_insert_duplicate_column_fails(void);
 static int test_insert_null_column_entry_fails(void);
 static int test_insert_escapes_csv_characters(void);
+static int test_insert_auto_id_without_columns(void);
+static int test_insert_auto_id_sequential(void);
+static int test_insert_auto_id_with_explicit_id(void);
 
 #define ASSERT_TRUE(expr)                                                        \
     do {                                                                         \
@@ -67,6 +70,9 @@ int main(void)
         {"insert duplicate column fails", test_insert_duplicate_column_fails},
         {"insert null column entry fails", test_insert_null_column_entry_fails},
         {"insert escapes csv characters", test_insert_escapes_csv_characters},
+        {"insert auto-id without columns", test_insert_auto_id_without_columns},
+        {"insert auto-id sequential", test_insert_auto_id_sequential},
+        {"insert auto-id with explicit id", test_insert_auto_id_with_explicit_id},
     };
     size_t i;
     int failed = 0;
@@ -363,6 +369,70 @@ static int test_insert_escapes_csv_characters(void)
     ASSERT_TRUE(storage_insert("users", NULL, (char **)values, 3) == 0);
     ASSERT_TRUE(read_text_file("data/tables/users.csv", buffer, sizeof(buffer)) == 0);
     ASSERT_TRUE(strcmp(buffer, "1,\"kim, \"\"minsu\"\"\",20\n") == 0);
+    status = 0;
+
+cleanup:
+    reset_test_environment();
+    return status;
+}
+
+/* ─── Week 7: auto-id 테스트 ─────────────────────────────────── */
+
+static int test_insert_auto_id_without_columns(void)
+{
+    const char *columns[] = {"name", "age"};
+    const char *values[] = {"alice", "25"};
+    char buffer[BUFFER_SIZE];
+    int status = 1;
+
+    reset_test_environment();
+    ASSERT_TRUE(prepare_dirs() == 0);
+    ASSERT_TRUE(write_text_file("data/schema/users.schema", "id,INT\nname,VARCHAR\nage,INT\n") == 0);
+    ASSERT_TRUE(storage_insert("users", (char **)columns, (char **)values, 2) == 0);
+    ASSERT_TRUE(read_text_file("data/tables/users.csv", buffer, sizeof(buffer)) == 0);
+    ASSERT_TRUE(strcmp(buffer, "1,alice,25\n") == 0);
+    status = 0;
+
+cleanup:
+    reset_test_environment();
+    return status;
+}
+
+static int test_insert_auto_id_sequential(void)
+{
+    const char *columns[] = {"name", "age"};
+    const char *values1[] = {"alice", "25"};
+    const char *values2[] = {"bob", "30"};
+    char buffer[BUFFER_SIZE];
+    int status = 1;
+
+    reset_test_environment();
+    ASSERT_TRUE(prepare_dirs() == 0);
+    ASSERT_TRUE(write_text_file("data/schema/users.schema", "id,INT\nname,VARCHAR\nage,INT\n") == 0);
+    ASSERT_TRUE(storage_insert("users", (char **)columns, (char **)values1, 2) == 0);
+    ASSERT_TRUE(storage_insert("users", (char **)columns, (char **)values2, 2) == 0);
+    ASSERT_TRUE(read_text_file("data/tables/users.csv", buffer, sizeof(buffer)) == 0);
+    ASSERT_TRUE(strcmp(buffer, "1,alice,25\n2,bob,30\n") == 0);
+    status = 0;
+
+cleanup:
+    reset_test_environment();
+    return status;
+}
+
+static int test_insert_auto_id_with_explicit_id(void)
+{
+    const char *columns[] = {"id", "name", "age"};
+    const char *values[] = {"99", "charlie", "35"};
+    char buffer[BUFFER_SIZE];
+    int status = 1;
+
+    reset_test_environment();
+    ASSERT_TRUE(prepare_dirs() == 0);
+    ASSERT_TRUE(write_text_file("data/schema/users.schema", "id,INT\nname,VARCHAR\nage,INT\n") == 0);
+    ASSERT_TRUE(storage_insert("users", (char **)columns, (char **)values, 3) == 0);
+    ASSERT_TRUE(read_text_file("data/tables/users.csv", buffer, sizeof(buffer)) == 0);
+    ASSERT_TRUE(strcmp(buffer, "99,charlie,35\n") == 0);
     status = 0;
 
 cleanup:
