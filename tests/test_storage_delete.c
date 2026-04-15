@@ -15,6 +15,8 @@
 #endif
 
 #include "types.h"
+#include "bptree.h"
+#include "index_registry.h"
 
 #define BUFFER_SIZE 4096
 #define PATH_SIZE 512
@@ -54,6 +56,8 @@ static int test_delete_invalid_operator_fails(void);
 static int test_delete_malformed_csv_fails(void);
 static int test_delete_row_count_mismatch_fails(void);
 static int test_delete_datetime_non_equality_fails(void);
+static int test_delete_index_sync_deleted_id_gone(void);
+static int test_delete_index_sync_remaining_row_idx(void);
 
 #define ASSERT_TRUE(expr)                                                        \
     do {                                                                         \
@@ -95,6 +99,8 @@ int main(void)
         {"delete malformed csv fails", test_delete_malformed_csv_fails},
         {"delete row count mismatch fails", test_delete_row_count_mismatch_fails},
         {"delete datetime non equality fails", test_delete_datetime_non_equality_fails},
+        {"delete index sync: deleted id gone from tree", test_delete_index_sync_deleted_id_gone},
+        {"delete index sync: remaining row_idx correct", test_delete_index_sync_remaining_row_idx},
     };
     size_t i;
     int failed = 0;
@@ -720,6 +726,63 @@ static int test_delete_datetime_non_equality_fails(void)
     status = 0;
 
 cleanup:
+    reset_test_environment();
+    return status;
+}
+
+/* ─── Week 7: DELETE 후 B+ 트리 인덱스 동기화 테스트 ─────────── */
+
+/* DELETE 된 id 는 트리에서 사라져야 한다 (-1 반환). */
+static int test_delete_index_sync_deleted_id_gone(void)
+{
+    WhereClause where = make_where("id", "=", "2");
+    BPTree *tree;
+    int status = 1;
+
+    reset_test_environment();
+    index_registry_destroy_all();
+    ASSERT_TRUE(prepare_table("users",
+                              "id,INT\nname,VARCHAR\n",
+                              "1,alice\n2,bob\n3,carol\n") == 0);
+
+    ASSERT_TRUE(storage_delete("users", &where, 1) == 0);
+
+    tree = index_registry_get("users");
+    ASSERT_TRUE(tree != NULL);
+    ASSERT_TRUE(bptree_search(tree, 2) == -1);  /* 삭제된 id */
+    status = 0;
+
+cleanup:
+    index_registry_destroy_all();
+    reset_test_environment();
+    return status;
+}
+
+/* DELETE 후 남은 행의 row_idx 가 올바르게 갱신되어야 한다. */
+static int test_delete_index_sync_remaining_row_idx(void)
+{
+    WhereClause where = make_where("id", "=", "1");
+    BPTree *tree;
+    int status = 1;
+
+    reset_test_environment();
+    index_registry_destroy_all();
+    ASSERT_TRUE(prepare_table("users",
+                              "id,INT\nname,VARCHAR\n",
+                              "1,alice\n2,bob\n3,carol\n") == 0);
+
+    /* id=1 삭제 후 id=2 → row 0, id=3 → row 1 */
+    ASSERT_TRUE(storage_delete("users", &where, 1) == 0);
+
+    tree = index_registry_get("users");
+    ASSERT_TRUE(tree != NULL);
+    ASSERT_TRUE(bptree_search(tree, 1) == -1);  /* 삭제된 id */
+    ASSERT_TRUE(bptree_search(tree, 2) == 0);   /* 첫 번째 행으로 이동 */
+    ASSERT_TRUE(bptree_search(tree, 3) == 1);   /* 두 번째 행으로 이동 */
+    status = 0;
+
+cleanup:
+    index_registry_destroy_all();
     reset_test_environment();
     return status;
 }
