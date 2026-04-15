@@ -105,8 +105,12 @@ bench: $(BENCH_TARGET)
 $(BENCH_TARGET): $(BENCH_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^
 
+# 라이브 B+ 트리 모양 덤프 (웹 데모 /api/tree_shape 용)
+tree_shape: bench/tree_shape.c src/bptree.c
+	$(CC) $(CFLAGS) -o tree_shape $^
+
 clean:
-	rm -f $(TARGET) $(TEST_TARGET) $(STORAGE_TEST_TARGETS) $(BPTREE_TEST_TARGET) $(BENCH_TEST_TARGET) $(REGISTRY_TEST_TARGET) $(BENCH_TARGET)
+	rm -f $(TARGET) $(TEST_TARGET) $(STORAGE_TEST_TARGETS) $(BPTREE_TEST_TARGET) $(BENCH_TEST_TARGET) $(REGISTRY_TEST_TARGET) $(BENCH_TARGET) tree_shape
 	rm -f data/*.csv data/*.schema
 	rm -f data/schema/*.schema data/tables/*.csv data/tables/*.csv.tmp
 
