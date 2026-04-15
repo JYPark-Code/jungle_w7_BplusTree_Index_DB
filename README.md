@@ -4,10 +4,12 @@
 > C 언어, CSV/바이너리 혼합 저장, CLI + Web UI 인터페이스.
 
 **요약 수치 (VS Code devcontainer / WSL 2 + Docker + 9p, Linux x86_64):**
-- B+ 트리 단건 조회 **2.18M ops/s** (선형 대비 **1,842×**)
+- B+ 트리 단건 조회 **2.18M ops/s** — 자료구조 pure 레벨 선형 대비 **1,842×** (`make bench`)
 - `storage_insert` **32 ms → 3 µs / 건** (10,000×) — devcontainer 9p/dirsync 환경에서
   발생하는 FS 레이어 병목을 5 단계 캐시로 제거. [INSERT 최적화 여정](#insert-성능-최적화-여정-32-ms--3-µs) 참조
 - 1M 행 `WHERE id BETWEEN` SQL 질의 **5.6 s → 2.2 s** (고정폭 바이너리 fseek 경로)
+- SQL end-to-end 웹 `/api/compare` 에서는 subprocess + ensure_index rebuild 때문에
+  배율이 **2.3×** 로 낮아진다. [왜 배율이 다른가](#왜-make-bench-1842-vs-apicompare-23-인가) 참조
 - 웹 데모: 결제 로그 장애 구간 조회 시연 (`python3 web/server.py`)
 
 > 모든 수치는 팀 공용 devcontainer 기준. 베어메탈 Linux/macOS 에서는 절대값이 더 작지만
@@ -355,6 +357,15 @@ chore:    설정, 환경
 
 ## 성능 목표 및 실측
 
+이 프로젝트는 **세 가지 다른 레벨**에서 성능을 측정한다. 숫자가 달라 보이는 게
+실수가 아니라 **측정 범위의 차이**임을 먼저 이해해야 한다.
+
+| 레벨 | 도구 | 포함 비용 | 배율 |
+|---|---|---|---|
+| ① 자료구조 pure | `make bench` | `bptree_search` 인-프로세스 호출만 | **1,842.9 ×** |
+| ② SQL end-to-end | `/api/compare` (웹) | subprocess + SQL 파싱 + ensure_index rebuild + 저장 I/O | **2.3 ×** |
+| ③ 저장 포맷 차 | 동일 SQL 질의를 CSV vs CSV+BIN 으로 | lazy rebuild 포함 SELECT 소요 | **3.6 ×** |
+
 ### 1. `make bench` — 순수 B+ 트리 레벨 (N = 1,000,000, order = 128)
 
 | 연산 | 건수 | 소요 | 처리량 |
@@ -364,14 +375,16 @@ chore:    설정, 환경
 | RANGE (폭 100) | 1,000 회 | 0.001 s | **1,258,973 qps** |
 | VERIFY | 1,000,000 / 1,000,000 | — | 100.0% |
 
-### 2. 선형 vs B+ 트리 비교 (MP9, pure tree level)
+### 2. 선형 vs B+ 트리 — 자료구조 pure (`make bench` 내부)
 
 | 방식 | 소요 | 처리량 | 배율 |
 |---|---|---|---|
-| **선형** flat array O(n) | 1.018 s | 982 qps | 1.0 × |
+| 선형 flat array O(n) | 1.018 s | 982 qps | 1.0 × |
 | **B+ 트리** O(log n) | 0.001 s | 1,809,509 qps | **1,842.9 ×** |
 
-### 3. SQL 질의 (`WHERE id BETWEEN 500000 AND 501500` on 1M rows)
+### 3. SQL 질의 (`WHERE id BETWEEN` on 1M rows, 결과 K = 1,501)
+
+**저장 포맷별 SELECT 소요** — 같은 B+ 트리 경로라도 row 검색 방식에 따라 차이.
 
 | 저장 | 질의 소요 | 구성 |
 |---|---|---|
@@ -380,7 +393,59 @@ chore:    설정, 환경
 | **CSV + 고정폭 BIN** | **2.22 s** | rebuild·retrieval 모두 BIN fseek |
 | linear `status='FAIL'` 기준선 | 4.99 s | 인덱스 불가 |
 
-- INSERT 평균 **0.70 µs/op**, SEARCH 평균 **0.46 µs/op**
+**웹 `/api/compare` 3 회 연속 측정 (1M clean 상태)**
+
+| 실행 | index_ms | linear_ms | speedup |
+|---|---|---|---|
+| 1 | 2,255.84 | 5,015.72 | 2.2 × |
+| 2 | 2,223.11 | 5,091.56 | 2.3 × |
+| 3 | 2,268.83 | 5,239.67 | 2.3 × |
+
+### 4. K (결과 행 수) 스윕 — 인덱스 효과의 단조성
+
+동일 데이터셋(1M)에서 range 폭만 바꿔가며 측정.
+
+| K | index (ms) | linear (ms) | speedup |
+|---|---|---|---|
+| 1 | 2,380 | 5,933 | **2.5 ×** |
+| 1,000 | 2,251 | 5,488 | 2.4 × |
+| 10,000 | 2,371 | 5,235 | 2.2 × |
+| 100,000 | 2,752 | 4,935 | 1.8 × |
+| 500,000 (50%) | 4,610 | 5,411 | 1.2 × |
+| 1,000,000 (전체) | 6,981 | 4,997 | **0.7 ×** ⚠️ |
+
+**해석:** K 가 클수록 index 의 이득이 감소하다 **교차점 이후 역전**. 이는 교과서적
+결과이며 실제 DBMS (PostgreSQL / MySQL) query planner 도 예상 selectivity 가
+낮으면 Index Scan 대신 Seq Scan 을 선택하는 이유와 동일.
+
+- index 비용 = rebuild 고정비(~1.8 s) + retrieval O(K)
+- linear 비용 = CSV 전체 스캔 (~5 s, K 무관)
+- 교차점 ≈ K / N = 50% 부근 — 이 경계가 실제 RDBMS cost estimator 가 판별하는 기준
+
+### 왜 `make bench` 1,842× vs `/api/compare` 2.3× 인가?
+
+같은 "선형 vs 인덱스" 인데 배율이 800 배나 다른 이유는 **측정하는 층이 다르기** 때문.
+
+| 구분 | `make bench` (1,842×) | `/api/compare` (2.3×) |
+|---|---|---|
+| 측정 대상 | `bptree_search()` 함수 호출 | SQL 전체 왕복 |
+| Subprocess 오버헤드 | ✗ 없음 | ✓ fork + exec 매번 |
+| SQL 파싱 | ✗ 없음 | ✓ tokenize + AST |
+| 트리 준비 | 미리 built-in (in-memory) | ✓ ensure_index 가 rebuild (~1.8 s) |
+| 파일 I/O | ✗ 순수 메모리 | ✓ CSV/BIN 읽기 |
+| linear 의 구현 | int 배열 순회 | CSV 전체 스캔 + string 비교 + 필터 |
+| K (반환 행) | 1 (point search) | 1,500 (range) |
+
+즉 `make bench` 는 "**자료구조 알고리즘이 얼마나 빠른가**" 를, `/api/compare` 는
+"**실제 SQL 한 번이 얼마나 빠른가**" 를 측정한다. 둘 다 참이며 용도가 다르다.
+
+**핵심 인사이트:** 현재 SQL 레벨 배율이 낮은 이유의 대부분은 **subprocess 모델
+때문에 매 질의마다 트리를 rebuild (1.8 s 고정비)** 하기 때문이다. PostgreSQL /
+MySQL 같은 영속 데몬이면 한 번 빌드된 인덱스가 메모리에 상주해 두 번째 질의부터는
+`make bench` 수치에 가까워진다.
+
+### 참고 · 기타
+- INSERT 평균 **0.70 µs/op**, SEARCH 평균 **0.46 µs/op** (pure tree)
 - `valgrind --leak-check=full` leak 0 (CI 자동)
 
 ---
