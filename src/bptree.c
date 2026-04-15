@@ -279,16 +279,61 @@ int bptree_search(BPTree *tree, int id) {
     return -1;
 }
 
+/* [from, to] 범위의 row_index 들을 leaf linked list 로 순회하며 out 에 채움.
+ * 양끝 포함. from > to 이거나 인자가 비정상이면 0 반환. */
 int bptree_range(BPTree *tree, int from, int to, int *out, int max_out) {
-    (void)tree;
-    (void)from;
-    (void)to;
-    (void)out;
-    (void)max_out;
-    return 0; /* 선택 구현. */
+    if (!tree || !tree->root || !out || max_out <= 0 || from > to) return 0;
+
+    /* from 이 속할 리프까지 descent. */
+    Node *cur = tree->root;
+    while (!cur->is_leaf) {
+        cur = cur->u.internal.children[internal_child_idx(cur, from)];
+    }
+
+    /* 리프 linked list 를 따라가며 [from, to] 범위 수집. */
+    int filled = 0;
+    while (cur && filled < max_out) {
+        for (int i = 0; i < cur->num_keys && filled < max_out; ++i) {
+            int k = cur->keys[i];
+            if (k < from) continue;
+            if (k > to) return filled; /* 정렬돼 있으므로 더 볼 필요 없음. */
+            out[filled++] = cur->u.leaf.row_indices[i];
+        }
+        cur = cur->u.leaf.next;
+    }
+    return filled;
+}
+
+/* 노드를 depth 만큼 들여쓰기로 출력. 내부 노드는 keys 를, 리프 노드는
+ * (key→row_index) 쌍과 next 링크 유무를 보여준다. */
+static void print_node(const Node *n, int depth) {
+    if (!n) return;
+    for (int d = 0; d < depth; ++d) fputs("  ", stdout);
+    if (n->is_leaf) {
+        printf("LEAF[");
+        for (int i = 0; i < n->num_keys; ++i) {
+            if (i) fputs(", ", stdout);
+            printf("%d->%d", n->keys[i], n->u.leaf.row_indices[i]);
+        }
+        printf("]%s\n", n->u.leaf.next ? " ->" : "");
+    } else {
+        printf("INT[");
+        for (int i = 0; i < n->num_keys; ++i) {
+            if (i) fputs(", ", stdout);
+            printf("%d", n->keys[i]);
+        }
+        printf("]\n");
+        for (int i = 0; i <= n->num_keys; ++i) {
+            print_node(n->u.internal.children[i], depth + 1);
+        }
+    }
 }
 
 void bptree_print(BPTree *tree) {
-    (void)tree;
-    /* 디버그용, 선택 구현. */
+    if (!tree || !tree->root) {
+        printf("(empty tree)\n");
+        return;
+    }
+    printf("BPTree(order=%d):\n", tree->order);
+    print_node(tree->root, 1);
 }

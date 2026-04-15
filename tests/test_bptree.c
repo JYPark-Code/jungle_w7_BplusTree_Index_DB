@@ -64,11 +64,11 @@ static void test_search_null_tree(void) {
     CHECK(bptree_search(NULL, 5) == -1, "bptree_search(NULL, ...) -> -1");
 }
 
-static void test_range_stub_returns_zero(void) {
-    printf("[TEST] range stub returns 0 (Phase 2 미구현)\n");
+static void test_range_empty_tree(void) {
+    printf("[TEST] 빈 트리에서 range → 0\n");
     BPTree *t = bptree_create(4);
     int out[8];
-    CHECK(bptree_range(t, 0, 100, out, 8) == 0, "range on empty tree -> 0");
+    CHECK(bptree_range(t, 0, 100, out, 8) == 0, "empty tree range -> 0");
     bptree_destroy(t);
 }
 
@@ -290,6 +290,82 @@ static void test_internal_split_large_scale(void) {
     bptree_destroy(t);
 }
 
+/* ---------- Phase 6: range query + print ---------- */
+
+static void test_range_basic(void) {
+    printf("[TEST] 작은 트리에서 range [3,7]\n");
+    BPTree *t = bptree_create(4);
+    for (int i = 1; i <= 10; ++i) bptree_insert(t, i, i * 10);
+    int out[16];
+    int n = bptree_range(t, 3, 7, out, 16);
+    CHECK(n == 5, "5건 매칭");
+    int ok = 1;
+    for (int i = 0; i < n; ++i) {
+        if (out[i] != (i + 3) * 10) ok = 0;
+    }
+    CHECK(ok, "row_index 가 30,40,50,60,70 순서대로");
+    bptree_destroy(t);
+}
+
+static void test_range_crosses_leaves(void) {
+    printf("[TEST] 여러 리프를 걸치는 range\n");
+    BPTree *t = bptree_create(4);
+    for (int i = 1; i <= 20; ++i) bptree_insert(t, i, i);
+    int out[32];
+    int n = bptree_range(t, 5, 15, out, 32);
+    CHECK(n == 11, "5..15 = 11 건 매칭");
+    int ok = 1;
+    for (int i = 0; i < n; ++i) {
+        if (out[i] != i + 5) ok = 0;
+    }
+    CHECK(ok, "순서 유지 (linked list 순회)");
+    bptree_destroy(t);
+}
+
+static void test_range_max_out_limit(void) {
+    printf("[TEST] max_out 으로 결과 절단\n");
+    BPTree *t = bptree_create(4);
+    for (int i = 1; i <= 20; ++i) bptree_insert(t, i, i);
+    int out[3];
+    int n = bptree_range(t, 1, 20, out, 3);
+    CHECK(n == 3, "max_out=3 이면 3 개까지만");
+    CHECK(out[0] == 1 && out[1] == 2 && out[2] == 3, "처음 3 개가 들어옴");
+    bptree_destroy(t);
+}
+
+static void test_range_no_match(void) {
+    printf("[TEST] 범위에 아무것도 없음\n");
+    BPTree *t = bptree_create(4);
+    for (int i = 1; i <= 10; ++i) bptree_insert(t, i * 10, i);
+    int out[8];
+    CHECK(bptree_range(t, 25, 29, out, 8) == 0, "20,30 사이 중간 구간 → 0");
+    CHECK(bptree_range(t, 200, 300, out, 8) == 0, "트리 상한 밖 → 0");
+    bptree_destroy(t);
+}
+
+static void test_range_invalid_args(void) {
+    printf("[TEST] 잘못된 인자 처리\n");
+    BPTree *t = bptree_create(4);
+    int out[4];
+    CHECK(bptree_range(NULL, 0, 10, out, 4) == 0, "NULL tree → 0");
+    CHECK(bptree_range(t, 0, 10, NULL, 4) == 0, "NULL out → 0");
+    CHECK(bptree_range(t, 10, 5, out, 4) == 0, "from > to → 0");
+    CHECK(bptree_range(t, 0, 10, out, 0) == 0, "max_out=0 → 0");
+    bptree_destroy(t);
+}
+
+static void test_print_smoke(void) {
+    printf("[TEST] bptree_print smoke (crash 없이 동작)\n");
+    BPTree *t = bptree_create(4);
+    bptree_print(t); /* 빈 트리 */
+    for (int i = 1; i <= 10; ++i) bptree_insert(t, i, i);
+    bptree_print(t); /* 여러 레벨 트리 */
+    CHECK(1, "print 완료");
+    bptree_destroy(t);
+    bptree_print(NULL); /* NULL 안전 */
+    CHECK(1, "NULL 트리 print 도 안전");
+}
+
 static void test_internal_split_various_orders(void) {
     printf("[TEST] order 3,5,16 에서도 200건 삽입이 정상 동작\n");
     int orders[] = {3, 5, 16};
@@ -312,14 +388,14 @@ static void test_insert_null_tree(void) {
 }
 
 int main(void) {
-    printf("=== test_bptree (Phase 5) ===\n");
+    printf("=== test_bptree (Phase 6: range + print) ===\n");
     test_create_with_valid_order();
     test_create_rejects_tiny_order();
     test_create_accepts_large_order();
     test_destroy_null_safe();
     test_search_on_empty_tree();
     test_search_null_tree();
-    test_range_stub_returns_zero();
+    test_range_empty_tree();
     test_multiple_create_destroy();
     test_insert_single();
     test_insert_sorted_order();
@@ -338,6 +414,12 @@ int main(void) {
     test_internal_split_shuffled();
     test_internal_split_large_scale();
     test_internal_split_various_orders();
+    test_range_basic();
+    test_range_crosses_leaves();
+    test_range_max_out_limit();
+    test_range_no_match();
+    test_range_invalid_args();
+    test_print_smoke();
 
     printf("\n[BPTREE TESTS] %d passed, %d failed\n", g_passed, g_failed);
     return g_failed == 0 ? 0 : 1;
