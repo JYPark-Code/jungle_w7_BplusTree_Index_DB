@@ -37,7 +37,7 @@ STATIC_FILES = {
 }
 
 
-def run_sql(sql: str, timeout: int = 30) -> dict:
+def run_sql(sql: str, timeout: int = 30, bulk: bool = False) -> dict:
     if not SQLPARSER.exists():
         return {"error": "sqlparser 바이너리 없음. make 먼저 실행하세요."}
     with tempfile.NamedTemporaryFile(
@@ -46,10 +46,15 @@ def run_sql(sql: str, timeout: int = 30) -> dict:
         tf.write(sql)
         tmp = tf.name
     try:
+        env = os.environ.copy()
+        if bulk:
+            # BULK_INSERT_MODE=1: per-insert fflush 생략으로 1M 건 INSERT 가 2.8초.
+            # subprocess 모델이라 프로세스 종료 시 atexit 에서 flush + close.
+            env["BULK_INSERT_MODE"] = "1"
         t0 = time.monotonic()
         proc = subprocess.run(
             [str(SQLPARSER), tmp, "--json"],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, env=env,
         )
         elapsed_ms = (time.monotonic() - t0) * 1000
     except subprocess.TimeoutExpired:
@@ -149,7 +154,7 @@ def inject_payments(count: int = 100000) -> dict:
         )
     sql = "\n".join(lines)
     t0 = time.monotonic()
-    result = run_sql(sql, timeout=60)
+    result = run_sql(sql, timeout=180, bulk=True)
     elapsed = (time.monotonic() - t0) * 1000
     return {
         "count": count,

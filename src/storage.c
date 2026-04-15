@@ -173,6 +173,165 @@ typedef struct {
 static StorageMetaCache s_meta[STORAGE_META_CACHE_MAX];
 static int s_meta_count = 0;
 
+/* ─── append FILE* 캐시 ─────────────────────────────────────────
+ * WSL 9p 같이 fopen/fclose 가 dirsync 비용을 타는 파일시스템에서
+ * 연속 INSERT 가 수십 ms/row 까지 느려지는 문제 완화용.
+ * 테이블별 FILE* 를 프로세스 생애동안 유지하고 매 write 후 fflush 만 한다.
+ * 프로세스 종료 시 atexit 로 일괄 fclose.
+ * 참고: 이 캐시는 스토리지 동기화용이 아니라 I/O 병목 최적화. fsync 보장은 없다. */
+typedef struct {
+    char  table_path[STORAGE_PATH_MAX];
+    FILE *fp;
+} StorageAppendFpEntry;
+static StorageAppendFpEntry s_append_fp[STORAGE_META_CACHE_MAX];
+static int s_append_fp_count = 0;
+static int s_append_fp_atexit_registered = 0;
+
+static void storage_append_fp_close_all(void);
+static FILE *storage_append_fp_get(const char *table_path);
+static void storage_append_fp_invalidate(const char *table_path);
+static void storage_append_fp_flush(const char *table_path);
+static int  storage_append_fp_is_open(const char *table_path);
+
+/* ─── schema 캐시 ───────────────────────────────────────────────
+ * load_schema 는 fopen + parse 를 매 호출 수행한다. 9p 환경에서 이것만으로도
+ * ms 단위 블로킹이 누적된다. 테이블별 결과를 캐시해 재사용. */
+typedef struct {
+    char    schema_path[STORAGE_PATH_MAX];
+    ColDef *schema;
+    int     count;
+} StorageSchemaCacheEntry;
+static StorageSchemaCacheEntry s_schema_cache[STORAGE_META_CACHE_MAX];
+static int s_schema_cache_count = 0;
+
+static int  storage_schema_cache_get(const char *schema_path, ColDef **out_schema, int *out_count);
+static void storage_schema_cache_invalidate(const char *schema_path);
+static void storage_schema_cache_clear_all(void);
+
+/* ─── path resolution 캐시 ───────────────────────────────────
+ * build_schema_path / build_table_path 는 nested/legacy fallback 탐색을 위해
+ * 호출마다 path_exists(stat) 을 최대 5회 수행한다. 9p FS 에서 각 stat 이
+ * 0.3ms 수준이라 연속 INSERT 가 수 ms/row 로 느려진다. 테이블별로 최종
+ * 결정된 schema_path / table_path 를 캐시해 이 비용을 제거.
+ * 무효화 트리거: storage_create (새 파일 생성), replace_table_file (rename). */
+typedef struct {
+    char table[64];
+    char schema_path[STORAGE_PATH_MAX];
+    char table_path[STORAGE_PATH_MAX];
+    int  has_schema;
+    int  has_table;
+} StoragePathCacheEntry;
+static StoragePathCacheEntry s_path_cache[STORAGE_META_CACHE_MAX];
+static int s_path_cache_count = 0;
+
+static StoragePathCacheEntry *storage_path_cache_entry(const char *table);
+static void storage_path_cache_invalidate(const char *table);
+static void storage_path_cache_clear_all(void);
+
+/* ─── lazy index rebuild 상태 ────────────────────────────────
+ * 웹 데모 등 subprocess 모델에서 B+ 트리가 프로세스 시작 시 비어있는 문제를
+ * 해결. 프로세스당 테이블당 1회만 실제 재구성하고 플래그로 기록. */
+#define STORAGE_INDEX_REBUILT_MAX STORAGE_META_CACHE_MAX
+static char s_index_rebuilt[STORAGE_INDEX_REBUILT_MAX][64];
+static int  s_index_rebuilt_count = 0;
+
+void storage_reset_internal_caches(void)
+{
+    storage_append_fp_close_all();   /* schema 캐시도 함께 해제 */
+    storage_path_cache_clear_all();
+    s_meta_count = 0;
+    s_index_rebuilt_count = 0;
+}
+
+void storage_ensure_index(const char *table)
+{
+    char schema_path[STORAGE_PATH_MAX];
+    char table_path[STORAGE_PATH_MAX];
+    ColDef *schema = NULL;
+    int schema_count = 0;
+    int id_col_index;
+    BPTree *tree;
+    FILE *fp;
+    int row_idx = 0;
+    int i;
+    char *record = NULL;
+
+    if (table == NULL || table[0] == '\0') return;
+
+    /* 이미 이 프로세스에서 재구성했으면 no-op */
+    for (i = 0; i < s_index_rebuilt_count; ++i) {
+        if (strcmp(s_index_rebuilt[i], table) == 0) return;
+    }
+
+    if (build_schema_path(table, schema_path, sizeof(schema_path)) != 0) return;
+    if (build_table_path(table, table_path, sizeof(table_path)) != 0) return;
+
+    if (storage_schema_cache_get(schema_path, &schema, &schema_count) != 0) return;
+    id_col_index = find_schema_index(schema, schema_count, "id");
+    if (id_col_index < 0) {
+        free(schema);
+        goto mark_done;
+    }
+
+    tree = index_registry_get_or_create(table, 128);
+    if (tree == NULL) {
+        free(schema);
+        return;
+    }
+
+    /* pending append 있으면 flush 후 CSV 처음부터 스캔 */
+    storage_append_fp_flush(table_path);
+
+    fp = fopen(table_path, "r");
+    if (fp == NULL) {
+        free(schema);
+        goto mark_done;  /* 테이블 없으면 빈 인덱스 유지 */
+    }
+
+    while (read_csv_record(fp, &record) == 1) {
+        char **fields = NULL;
+        int field_count = 0;
+        if (parse_csv_record(record, &fields, &field_count) == 0) {
+            if (id_col_index < field_count && fields[id_col_index] != NULL) {
+                int id = atoi(fields[id_col_index]);
+                if (id > 0) {
+                    bptree_insert(tree, id, row_idx);
+                }
+            }
+            free_string_array(fields, field_count);
+        }
+        free(record);
+        record = NULL;
+        row_idx++;
+    }
+    fclose(fp);
+
+    /* meta cache 도 동기화 */
+    {
+        int meta_idx = -1;
+        for (i = 0; i < s_meta_count; ++i) {
+            if (strcmp(s_meta[i].table, table) == 0) { meta_idx = i; break; }
+        }
+        if (meta_idx < 0 && s_meta_count < STORAGE_META_CACHE_MAX) {
+            int max_id = 0, rc = 0;
+            meta_idx = s_meta_count++;
+            snprintf(s_meta[meta_idx].table, sizeof(s_meta[meta_idx].table), "%s", table);
+            scan_csv_meta(table_path, id_col_index, &max_id, &rc);
+            s_meta[meta_idx].next_id      = max_id + 1;
+            s_meta[meta_idx].next_row_idx = rc;
+        }
+    }
+
+    free(schema);
+
+mark_done:
+    if (s_index_rebuilt_count < STORAGE_INDEX_REBUILT_MAX) {
+        snprintf(s_index_rebuilt[s_index_rebuilt_count],
+                 sizeof(s_index_rebuilt[s_index_rebuilt_count]), "%s", table);
+        s_index_rebuilt_count++;
+    }
+}
+
 /* 입력: 테이블 이름, optional 컬럼 목록, 값 목록, 값 개수
  * 동작: schema를 읽어 INSERT 값을 schema 순서의 row로 정렬한 뒤 CSV에 append
  *       id 컬럼이 스키마에 있고 사용자가 값을 안 넣었으면 auto-increment id 부여
@@ -207,12 +366,32 @@ int storage_insert(const char *table, char **columns, char **values, int count)
         return -1;
     }
 
-    if (load_schema(schema_path, &schema, &schema_count) != 0) {
+    if (storage_schema_cache_get(schema_path, &schema, &schema_count) != 0) {
         return -1;
     }
 
     /* ── auto-id: 스키마에 "id" 컬럼이 있는데 사용자가 안 넣었으면 자동 부여 ── */
     id_col_index = find_schema_index(schema, schema_count, "id");
+
+    /* id 컬럼이 있으면 사용자-id / auto-id 경로 모두 동일하게 meta cache 를
+     * 초기화해둔다. 그래야 아래 row_idx 결정 시 count_csv_rows 로 빠지지 않는다
+     * (그 경로는 O(N) per insert 라 대량 INSERT 시 O(N^2) 가 된다). */
+    if (id_col_index >= 0) {
+        int k;
+        int cache_idx = -1;
+        for (k = 0; k < s_meta_count; ++k) {
+            if (strcmp(s_meta[k].table, table) == 0) { cache_idx = k; break; }
+        }
+        if (cache_idx < 0 && s_meta_count < STORAGE_META_CACHE_MAX) {
+            int max_id = 0, row_count = 0;
+            cache_idx = s_meta_count++;
+            snprintf(s_meta[cache_idx].table,
+                     sizeof(s_meta[cache_idx].table), "%s", table);
+            scan_csv_meta(table_path, id_col_index, &max_id, &row_count);
+            s_meta[cache_idx].next_id      = max_id + 1;
+            s_meta[cache_idx].next_row_idx = row_count;
+        }
+    }
 
     if (id_col_index >= 0 && columns != NULL) {
         /* columns != NULL 일 때만 auto-id 검사.
@@ -242,8 +421,10 @@ int storage_insert(const char *table, char **columns, char **values, int count)
                     break;
                 }
             }
-            /* 캐시가 있어도 파일이 사라지거나 비어있으면 무효화 */
-            if (cache_idx >= 0 && s_meta[cache_idx].next_row_idx > 0) {
+            /* 캐시가 있어도 파일이 사라지거나 비어있으면 무효화.
+             * append_fp 캐시가 살아있으면 파일 존재는 보장되므로 stat 생략 (9p round-trip 절감). */
+            if (cache_idx >= 0 && s_meta[cache_idx].next_row_idx > 0 &&
+                storage_append_fp_is_open(table_path) == 0) {
                 STAT_STRUCT st;
                 if (STAT_FUNC(table_path, &st) != 0 || st.st_size == 0) {
                     s_meta[cache_idx].next_id      = 1;
@@ -746,6 +927,11 @@ int storage_create(const char *table, char **col_defs, int count)
         return -1;
     }
 
+    /* 새 스키마 작성 전 캐시/append-fp 무효화: 이전에 같은 이름 테이블이 있었다면 stale */
+    storage_schema_cache_invalidate(schema_path);
+    storage_append_fp_invalidate(table_path);
+    storage_path_cache_invalidate(table);
+
     schema_fp = fopen(schema_path, "w");
     if (schema_fp == NULL) {
         goto cleanup;
@@ -885,6 +1071,17 @@ static int build_schema_path(const char *table, char *out, size_t size)
 {
     int written;
     char legacy_path[STORAGE_PATH_MAX];
+    StoragePathCacheEntry *entry;
+
+    /* 캐시 히트: 이미 결정된 경로를 그대로 복사해 반환 (stat 생략). */
+    entry = storage_path_cache_entry(table);
+    if (entry != NULL && entry->has_schema) {
+        written = snprintf(out, size, "%s", entry->schema_path);
+        if (written < 0 || (size_t)written >= size) {
+            return -1;
+        }
+        return 0;
+    }
 
     written = snprintf(out, size, "data/schema/%s.schema", table);
     if (written < 0 || (size_t)written >= size) {
@@ -896,17 +1093,26 @@ static int build_schema_path(const char *table, char *out, size_t size)
         return -1;
     }
 
-    if (path_exists(out)) {
-        return 0;
-    }
-
-    if (path_exists(legacy_path)) {
-        written = snprintf(out, size, "%s", legacy_path);
-        if (written < 0 || (size_t)written >= size) {
-            return -1;
+    if (!path_exists(out)) {
+        if (path_exists(legacy_path)) {
+            written = snprintf(out, size, "%s", legacy_path);
+            if (written < 0 || (size_t)written >= size) {
+                return -1;
+            }
         }
     }
 
+    /* 결과 캐싱 */
+    if (entry == NULL && s_path_cache_count < STORAGE_META_CACHE_MAX) {
+        entry = &s_path_cache[s_path_cache_count++];
+        snprintf(entry->table, sizeof(entry->table), "%s", table);
+        entry->has_schema = 0;
+        entry->has_table = 0;
+    }
+    if (entry != NULL) {
+        snprintf(entry->schema_path, sizeof(entry->schema_path), "%s", out);
+        entry->has_schema = 1;
+    }
     return 0;
 }
 
@@ -918,6 +1124,16 @@ static int build_table_path(const char *table, char *out, size_t size)
     int written;
     char legacy_path[STORAGE_PATH_MAX];
     char nested_schema_path[STORAGE_PATH_MAX];
+    StoragePathCacheEntry *entry;
+
+    entry = storage_path_cache_entry(table);
+    if (entry != NULL && entry->has_table) {
+        written = snprintf(out, size, "%s", entry->table_path);
+        if (written < 0 || (size_t)written >= size) {
+            return -1;
+        }
+        return 0;
+    }
 
     written = snprintf(out, size, "data/tables/%s.csv", table);
     if (written < 0 || (size_t)written >= size) {
@@ -934,17 +1150,25 @@ static int build_table_path(const char *table, char *out, size_t size)
         return -1;
     }
 
-    if (path_exists(out) || path_exists(nested_schema_path)) {
-        return 0;
-    }
-
-    if (path_exists(legacy_path)) {
-        written = snprintf(out, size, "%s", legacy_path);
-        if (written < 0 || (size_t)written >= size) {
-            return -1;
+    if (!(path_exists(out) || path_exists(nested_schema_path))) {
+        if (path_exists(legacy_path)) {
+            written = snprintf(out, size, "%s", legacy_path);
+            if (written < 0 || (size_t)written >= size) {
+                return -1;
+            }
         }
     }
 
+    if (entry == NULL && s_path_cache_count < STORAGE_META_CACHE_MAX) {
+        entry = &s_path_cache[s_path_cache_count++];
+        snprintf(entry->table, sizeof(entry->table), "%s", table);
+        entry->has_schema = 0;
+        entry->has_table = 0;
+    }
+    if (entry != NULL) {
+        snprintf(entry->table_path, sizeof(entry->table_path), "%s", out);
+        entry->has_table = 1;
+    }
     return 0;
 }
 
@@ -1150,6 +1374,7 @@ static int count_csv_rows(const char *table_path)
     int count = 0;
     char *record = NULL;
 
+    storage_append_fp_flush(table_path);
     fp = fopen(table_path, "r");
     if (fp == NULL) {
         return 0;
@@ -1175,6 +1400,7 @@ static void scan_csv_meta(const char *table_path, int id_col_index,
     int row_count = 0;
     char *record = NULL;
 
+    storage_append_fp_flush(table_path);
     fp = fopen(table_path, "r");
     if (fp == NULL) {
         *out_max_id    = 0;
@@ -1237,6 +1463,7 @@ static void rebuild_index(const char *table, const char *table_path,
     tree = index_registry_get_or_create(table, 128);
     if (tree == NULL) return;
 
+    storage_append_fp_flush(table_path);
     fp = fopen(table_path, "r");
     if (fp == NULL) return;
 
@@ -1266,24 +1493,236 @@ static void rebuild_index(const char *table, const char *table_path,
 static int append_csv_row(const char *table_path, char **row, int row_count)
 {
     FILE *fp;
-    int status;
 
-    fp = fopen(table_path, "a");
+    fp = storage_append_fp_get(table_path);
     if (fp == NULL) {
         return -1;
     }
 
-    status = write_csv_row(fp, row, row_count);
-    if (status != 0) {
-        fclose(fp);
+    if (write_csv_row(fp, row, row_count) != 0) {
+        storage_append_fp_invalidate(table_path);
         return -1;
     }
 
-    if (fclose(fp) != 0) {
-        return -1;
+    /* userspace → kernel 로 즉시 flush. 같은 프로세스의 직접 파일 reader
+     * (tests 등) 가 바로 보도록 보장. fsync 는 아니므로 9p dirsync 비용은 없음.
+     * BULK_INSERT_MODE=1 환경변수가 설정돼 있으면 write() 도 버퍼에 누적해
+     * setvbuf 64KB 가 찰 때만 flush — 대용량 batch inject 전용. */
+    {
+        static int lazy_flush = -1;
+        if (lazy_flush == -1) {
+            const char *env = getenv("BULK_INSERT_MODE");
+            lazy_flush = (env && env[0] == '1') ? 1 : 0;
+        }
+        if (!lazy_flush && fflush(fp) != 0) {
+            storage_append_fp_invalidate(table_path);
+            return -1;
+        }
     }
-
     return 0;
+}
+
+/* 해당 테이블의 append FILE* 가 열려 있으면 1, 아니면 0. */
+static int storage_append_fp_is_open(const char *table_path)
+{
+    int i;
+    for (i = 0; i < s_append_fp_count; ++i) {
+        if (strcmp(s_append_fp[i].table_path, table_path) == 0 &&
+            s_append_fp[i].fp != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 지정된 테이블 append 버퍼를 kernel 로 내림. 같은 프로세스 내 reader 가 호출. */
+static void storage_append_fp_flush(const char *table_path)
+{
+    int i;
+    for (i = 0; i < s_append_fp_count; ++i) {
+        if (strcmp(s_append_fp[i].table_path, table_path) == 0) {
+            if (s_append_fp[i].fp != NULL) {
+                fflush(s_append_fp[i].fp);
+            }
+            return;
+        }
+    }
+}
+
+static FILE *storage_append_fp_get(const char *table_path)
+{
+    int i;
+    int slot;
+    FILE *fp;
+
+    for (i = 0; i < s_append_fp_count; ++i) {
+        if (strcmp(s_append_fp[i].table_path, table_path) == 0) {
+            return s_append_fp[i].fp;
+        }
+    }
+
+    if (s_append_fp_count >= STORAGE_META_CACHE_MAX) {
+        /* 슬롯 부족 시 가장 오래된 것 하나를 닫고 재사용 (단순 FIFO). */
+        if (s_append_fp[0].fp != NULL) {
+            fclose(s_append_fp[0].fp);
+        }
+        for (i = 1; i < s_append_fp_count; ++i) {
+            s_append_fp[i - 1] = s_append_fp[i];
+        }
+        s_append_fp_count--;
+    }
+
+    fp = fopen(table_path, "a");
+    if (fp == NULL) {
+        return NULL;
+    }
+    /* 큰 버퍼로 syscall 수 감소 */
+    setvbuf(fp, NULL, _IOFBF, 64 * 1024);
+
+    if (!s_append_fp_atexit_registered) {
+        atexit(storage_append_fp_close_all);
+        s_append_fp_atexit_registered = 1;
+    }
+
+    slot = s_append_fp_count++;
+    snprintf(s_append_fp[slot].table_path,
+             sizeof(s_append_fp[slot].table_path), "%s", table_path);
+    s_append_fp[slot].fp = fp;
+    return fp;
+}
+
+static void storage_append_fp_invalidate(const char *table_path)
+{
+    int i;
+    for (i = 0; i < s_append_fp_count; ++i) {
+        if (strcmp(s_append_fp[i].table_path, table_path) == 0) {
+            if (s_append_fp[i].fp != NULL) {
+                fclose(s_append_fp[i].fp);
+                s_append_fp[i].fp = NULL;
+            }
+            for (; i + 1 < s_append_fp_count; ++i) {
+                s_append_fp[i] = s_append_fp[i + 1];
+            }
+            s_append_fp_count--;
+            return;
+        }
+    }
+}
+
+static void storage_append_fp_close_all(void)
+{
+    int i;
+    for (i = 0; i < s_append_fp_count; ++i) {
+        if (s_append_fp[i].fp != NULL) {
+            fclose(s_append_fp[i].fp);
+            s_append_fp[i].fp = NULL;
+        }
+    }
+    s_append_fp_count = 0;
+    storage_schema_cache_clear_all();
+}
+
+/* schema 캐시: 한 번 파싱한 schema 를 테이블별로 보관. 캐시 히트 시 clone 반환. */
+static int storage_schema_cache_get(const char *schema_path, ColDef **out_schema, int *out_count)
+{
+    int i;
+    int slot;
+    ColDef *fresh = NULL;
+    int fresh_count = 0;
+    ColDef *cached_clone;
+
+    for (i = 0; i < s_schema_cache_count; ++i) {
+        if (strcmp(s_schema_cache[i].schema_path, schema_path) == 0) {
+            cached_clone = malloc(sizeof(ColDef) * (size_t)s_schema_cache[i].count);
+            if (cached_clone == NULL) {
+                return -1;
+            }
+            memcpy(cached_clone, s_schema_cache[i].schema,
+                   sizeof(ColDef) * (size_t)s_schema_cache[i].count);
+            *out_schema = cached_clone;
+            *out_count  = s_schema_cache[i].count;
+            return 0;
+        }
+    }
+
+    /* miss — 실제 로드 후 캐시에 원본을 복사 저장, 호출자에게는 로드된 원본 반환 */
+    if (load_schema(schema_path, &fresh, &fresh_count) != 0) {
+        return -1;
+    }
+
+    if (s_schema_cache_count < STORAGE_META_CACHE_MAX && fresh_count > 0) {
+        slot = s_schema_cache_count++;
+        snprintf(s_schema_cache[slot].schema_path,
+                 sizeof(s_schema_cache[slot].schema_path), "%s", schema_path);
+        s_schema_cache[slot].schema = malloc(sizeof(ColDef) * (size_t)fresh_count);
+        if (s_schema_cache[slot].schema != NULL) {
+            memcpy(s_schema_cache[slot].schema, fresh,
+                   sizeof(ColDef) * (size_t)fresh_count);
+            s_schema_cache[slot].count = fresh_count;
+        } else {
+            s_schema_cache_count--;
+        }
+    }
+
+    *out_schema = fresh;
+    *out_count  = fresh_count;
+    return 0;
+}
+
+static void storage_schema_cache_invalidate(const char *schema_path)
+{
+    int i;
+    for (i = 0; i < s_schema_cache_count; ++i) {
+        if (strcmp(s_schema_cache[i].schema_path, schema_path) == 0) {
+            free(s_schema_cache[i].schema);
+            for (; i + 1 < s_schema_cache_count; ++i) {
+                s_schema_cache[i] = s_schema_cache[i + 1];
+            }
+            s_schema_cache_count--;
+            return;
+        }
+    }
+}
+
+static void storage_schema_cache_clear_all(void)
+{
+    int i;
+    for (i = 0; i < s_schema_cache_count; ++i) {
+        free(s_schema_cache[i].schema);
+    }
+    s_schema_cache_count = 0;
+}
+
+static StoragePathCacheEntry *storage_path_cache_entry(const char *table)
+{
+    int i;
+    if (table == NULL) return NULL;
+    for (i = 0; i < s_path_cache_count; ++i) {
+        if (strcmp(s_path_cache[i].table, table) == 0) {
+            return &s_path_cache[i];
+        }
+    }
+    return NULL;
+}
+
+static void storage_path_cache_clear_all(void)
+{
+    s_path_cache_count = 0;
+}
+
+static void storage_path_cache_invalidate(const char *table)
+{
+    int i;
+    if (table == NULL) return;
+    for (i = 0; i < s_path_cache_count; ++i) {
+        if (strcmp(s_path_cache[i].table, table) == 0) {
+            for (; i + 1 < s_path_cache_count; ++i) {
+                s_path_cache[i] = s_path_cache[i + 1];
+            }
+            s_path_cache_count--;
+            return;
+        }
+    }
 }
 
 /* 입력: 출력 파일 포인터, row 배열, row 길이
@@ -1474,6 +1913,7 @@ static int delete_rows_from_table(const char *table_path, const char *temp_path,
 
     remove(temp_path);
 
+    storage_append_fp_flush(table_path);
     source_fp = fopen(table_path, "r");
     if (source_fp == NULL) {
         return -1;
@@ -1570,6 +2010,7 @@ static int update_rows_from_table(const char *table_path, const char *temp_path,
 
     remove(temp_path);
 
+    storage_append_fp_flush(table_path);
     source_fp = fopen(table_path, "r");
     if (source_fp == NULL) {
         return -1;
@@ -2206,6 +2647,10 @@ static int like_match(const char *text, const char *pattern)
  * 반환: 교체 성공 0, 파일 시스템 오류면 -1 */
 static int replace_table_file(const char *table_path, const char *temp_path)
 {
+    /* append fp 캐시가 원본 파일을 쥐고 있으면 rename 후 stale inode 를 가리키게 된다.
+     * 교체 전에 해당 핸들을 닫아둔다. */
+    storage_append_fp_invalidate(table_path);
+
     if (remove(table_path) != 0) {
         return -1;
     }
@@ -2614,6 +3059,7 @@ static int load_table_rows(const char *table_path, int schema_count, StorageRowB
     rows->capacity = 0;
     rows->row_width = schema_count;
 
+    storage_append_fp_flush(table_path);
     fp = fopen(table_path, "r");
     if (fp == NULL) {
         return -1;
@@ -2682,6 +3128,7 @@ static int load_row_at_index(const char *table_path, int schema_count, int row_i
         return 0;
     }
 
+    storage_append_fp_flush(table_path);
     fp = fopen(table_path, "r");
     if (fp == NULL) {
         return -1;

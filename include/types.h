@@ -226,6 +226,17 @@ int  storage_select_result_by_row_index(const char *table, ParsedSQL *sql,
 int  storage_select_result_by_row_indices(const char *table, ParsedSQL *sql,
                                           const int *row_indices, int count,
                                           RowSet **out);
+/* 내부 캐시(append FILE*, schema, path resolution) 를 전부 무효화.
+ * 테스트가 data/ 디렉터리를 직접 rm -rf 하듯이 파일 계층을 건드린 뒤 호출해야
+ * 다음 storage_* 호출이 stale 상태를 보지 않는다. */
+void storage_reset_internal_caches(void);
+
+/* 현재 프로세스에서 해당 테이블의 B+ 트리 인덱스를 lazy rebuild.
+ * sqlparser 가 subprocess 모델로 동작하므로 새 프로세스마다 인덱스가 빈 상태로
+ * 시작한다. SELECT 경로 진입 시 이 함수를 호출하면 CSV → 트리를 한 번만
+ * 재구성해 B+ 트리 경로가 실제로 트리거되도록 보장한다.
+ * 프로세스당 테이블당 1회만 실제 재구성 수행 (이후 호출은 O(1) no-op). */
+void storage_ensure_index(const char *table);
 void print_rowset(FILE *out, const RowSet *rs);
 void rowset_free(RowSet *rs);
 

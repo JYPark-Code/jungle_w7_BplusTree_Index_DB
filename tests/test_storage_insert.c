@@ -118,6 +118,7 @@ static void remove_dir_if_exists(const char *path)
 
 static int reset_test_environment(void)
 {
+    storage_reset_internal_caches();
     remove_file_if_exists("data/tables/events.csv");
     remove_file_if_exists("data/tables/quotes.csv");
     remove_file_if_exists("data/tables/users.csv");

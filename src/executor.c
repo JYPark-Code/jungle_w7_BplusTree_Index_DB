@@ -58,6 +58,9 @@ void execute(ParsedSQL *sql) {
             break;
 
         case QUERY_SELECT:
+            /* subprocess 모델 대응: 첫 SELECT 진입 시 CSV → B+ 트리 lazy rebuild.
+             * 프로세스당 테이블당 1회만 실제 동작, 이후 no-op. */
+            storage_ensure_index(sql->table);
             /* WHERE id BETWEEN ? AND ? 를 가장 먼저 시도하고,
              * 그 다음 WHERE id = ? 단건 인덱스 경로를 탄다. */
             if (executor_try_range_select(sql->table, sql) != 0 &&
