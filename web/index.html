@@ -389,8 +389,12 @@ table {
 
 /* ═══════ CHART ═══════════════════════════════════════════════ */
 .chart-area {
-  display: none; margin-top: 32px; max-width: 520px;
+  /* 이전: max-width 520px 이 3-card grid 를 clamp 해 왼쪽 몰림 발생 → 제거 */
+  display: none;
+  margin-top: 24px;
+  width: 100%;
 }
+.chart-area.is-open { display: block; }
 #compare-summary { margin-top: 24px; }
 .big-number {
   font-size: clamp(48px, 6vw, 80px);

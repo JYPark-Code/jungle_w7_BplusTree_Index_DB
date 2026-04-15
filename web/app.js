@@ -269,7 +269,8 @@ function renderChart(data) {
   const ctx = $("#chart").getContext("2d");
   if (chart) chart.destroy();
   const area = $("#chart-area");
-  if (area) area.style.display = "block";
+  // max-width 클램프 제거 후 is-open 클래스로 표시 제어
+  if (area) { area.classList.add("is-open"); area.style.display = "block"; }
 
   $("#sql-summary").innerHTML = `
     <div class="big-number">${data.speedup}×</div>
