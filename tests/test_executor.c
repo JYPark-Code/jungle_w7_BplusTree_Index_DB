@@ -1,4 +1,5 @@
 #include "types.h"
+#include "bptree.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -28,6 +29,28 @@
 #define USERS_CSV_PATH DATA_DIR "/users.csv"
 #define USERS_NESTED_SCHEMA_PATH DATA_SCHEMA_DIR "/users.schema"
 #define USERS_NESTED_CSV_PATH DATA_TABLES_DIR "/users.csv"
+
+extern BPTree *g_tree;
+
+static int fake_bptree_search_calls = 0;
+static int fake_bptree_last_id = -1;
+static int fake_bptree_result = -1;
+
+int bptree_search(BPTree *tree, int id)
+{
+    (void)tree;
+    fake_bptree_search_calls++;
+    fake_bptree_last_id = id;
+    return fake_bptree_result;
+}
+
+static void reset_fake_bptree(int search_result)
+{
+    fake_bptree_search_calls = 0;
+    fake_bptree_last_id = -1;
+    fake_bptree_result = search_result;
+    g_tree = (BPTree *)0x1;
+}
 
 static char *duplicate_string(const char *source)
 {
@@ -363,6 +386,152 @@ static int test_storage_select_rejects_unknown_column(void)
     return 0;
 }
 
+static int test_execute_select_where_id_uses_bptree_path(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "3");
+
+    reset_fake_bptree(2);
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture indexed SELECT output.");
+        return 1;
+    }
+
+    if (fake_bptree_search_calls != 1 || fake_bptree_last_id != 3) {
+        free(output);
+        free_parsed(sql);
+        fail_test("WHERE id query did not use bptree_search.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Chloe | 27") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Indexed SELECT output did not include the indexed row.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_non_id_where_keeps_storage_path(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "name");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "'Bob'");
+
+    reset_fake_bptree(1);
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture non-indexed SELECT output.");
+        return 1;
+    }
+
+    if (fake_bptree_search_calls != 0) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Non-id WHERE should not call bptree_search.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "Bob | 24") ||
+        !contains_text(output, "(1 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Non-id WHERE query should keep storage_select behavior.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
+static int test_execute_select_where_id_missing_prints_empty_result(void)
+{
+    ParsedSQL *sql;
+    char *output;
+
+    sql = make_base_select();
+    if (sql == NULL) {
+        fail_test("Failed to allocate ParsedSQL.");
+        return 1;
+    }
+
+    sql->col_count = 2;
+    sql->columns = (char **)calloc(2U, sizeof(char *));
+    sql->columns[0] = duplicate_string("name");
+    sql->columns[1] = duplicate_string("age");
+    sql->where_count = 1;
+    sql->where = (WhereClause *)calloc(1U, sizeof(WhereClause));
+    strcpy(sql->where[0].column, "id");
+    strcpy(sql->where[0].op, "=");
+    strcpy(sql->where[0].value, "999");
+
+    reset_fake_bptree(-1);
+    if (capture_stdout_for_select(sql, &output) != 0) {
+        free_parsed(sql);
+        fail_test("Failed to capture empty indexed SELECT output.");
+        return 1;
+    }
+
+    if (fake_bptree_search_calls != 1 || fake_bptree_last_id != 999) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Missing id query did not use bptree_search.");
+        return 1;
+    }
+
+    if (!contains_text(output, "name | age") ||
+        !contains_text(output, "(0 rows)")) {
+        free(output);
+        free_parsed(sql);
+        fail_test("Missing id query did not preserve empty-result formatting.");
+        return 1;
+    }
+
+    free(output);
+    free_parsed(sql);
+    return 0;
+}
+
 int run_executor_tests(void)
 {
     int status;
@@ -392,8 +561,24 @@ int run_executor_tests(void)
         goto cleanup;
     }
 
+    if (test_execute_select_where_id_uses_bptree_path() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_non_id_where_keeps_storage_path() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
+    if (test_execute_select_where_id_missing_prints_empty_result() != 0) {
+        status = 1;
+        goto cleanup;
+    }
+
 cleanup:
     cleanup_fixture_files();
+    g_tree = NULL;
     if (status == 0) {
         fprintf(stderr, "[EXECUTOR TESTS] passed\n");
     }
