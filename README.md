@@ -3,11 +3,15 @@
 > Week 6 SQL 처리기에 B+ 트리 인덱스 + 고정폭 바이너리 저장 레이어를 얹은 확장 프로젝트.
 > C 언어, CSV/바이너리 혼합 저장, CLI + Web UI 인터페이스.
 
-**요약 수치 (WSL 9p / Linux x86_64):**
+**요약 수치 (VS Code devcontainer / WSL 2 + Docker + 9p, Linux x86_64):**
 - B+ 트리 단건 조회 **2.18M ops/s** (선형 대비 **1,842×**)
-- `storage_insert` **32 ms → 3 µs / 건** (10,000×) — [INSERT 최적화 여정](#insert-성능-최적화-여정-32-ms--3-µs) 참조
+- `storage_insert` **32 ms → 3 µs / 건** (10,000×) — devcontainer 9p/dirsync 환경에서
+  발생하는 FS 레이어 병목을 5 단계 캐시로 제거. [INSERT 최적화 여정](#insert-성능-최적화-여정-32-ms--3-µs) 참조
 - 1M 행 `WHERE id BETWEEN` SQL 질의 **5.6 s → 2.2 s** (고정폭 바이너리 fseek 경로)
 - 웹 데모: 결제 로그 장애 구간 조회 시연 (`python3 web/server.py`)
+
+> 모든 수치는 팀 공용 devcontainer 기준. 베어메탈 Linux/macOS 에서는 절대값이 더 작지만
+> 상대적인 배율 (1,842× / 10,000×) 은 유사한 경향.
 
 ---
 
@@ -132,45 +136,96 @@ python3 scripts/gen_payments_fixture.py 10000000 # 1000만 건
 
 ## INSERT 성능 최적화 여정 (32 ms → 3 µs)
 
-초기 웹 데모에서 100만 건 inject 가 60초 타임아웃에 2,716 건만 들어가던 상황 (32 ms/건).
-아래 5 단계로 **10,000× 가속**.
+### 왜 이 문제가 발생했나 — 개발 환경 (VM / Docker devcontainer)
 
-| 단계 | 조치 | 효과 (10k INSERT) |
+```
+ Windows Host
+ └── WSL2 (Linux VM)
+     └── Docker Desktop
+         └── devcontainer (우리 개발 환경)
+             └── /workspaces/bptree_index      ← data/ 가 여기!
+                 └── Windows C:\ 를 9p 프로토콜 + dirsync 옵션으로 마운트
+```
+
+팀 전원이 VS Code **devcontainer** 환경에서 작업 → 컨테이너 안에서 본 저장소 폴더가
+사실은 호스트 Windows 드라이브. 이를 Linux 컨테이너로 전달하기 위해 WSL2 가
+**9p 프로토콜 (Plan 9 파일시스템)** 로 bridge 하고, 안정성을 위해 `dirsync` 마운트
+옵션이 켜져 있다.
+
+```bash
+$ mount | grep workspaces
+C:\ on /workspaces/bptree_index type 9p (rw,noatime,dirsync,...)
+```
+
+**결과:** `fopen / fclose / stat` 하나하나가 VM → Docker → 9p → Windows 왕복을 거친다.
+
+| 환경 | `fopen` + `fclose` 1 쌍 | 100만 INSERT 예상 |
 |---|---|---|
-| 원인 파악 | `user+sys 0.7s`, `real 14.8s` — 93%가 I/O wait. `df -T`: `data/` 가 WSL 9p + `dirsync` | 원인 확정 |
-| ① append FILE\* 캐시 | `fopen/fclose` per row → 프로세스 생애동안 hold-open + setvbuf 64KB. dirsync 비용을 atexit 1회로 압축 | 14.8s → 13.5s |
-| ② schema 캐시 | `load_schema` (fopen + parse) 가 매 INSERT 호출 → 테이블당 1회만 로드 후 memcpy clone | 13.5s → 4.8s |
-| ③ path resolution 캐시 | `build_schema_path` / `build_table_path` 의 legacy/nested fallback 최대 5 stat → 첫 호출만 | 4.8s → 1.4s |
-| ④ user-id 경로 meta cache 통합 | 사용자가 `id` 명시한 INSERT 는 meta cache 미초기화 → `count_csv_rows` 매 호출 O(N²). 경로 무관 통합 | O(N²) 제거 |
-| ⑤ `BULK_INSERT_MODE=1` | per-insert `fflush` 생략 (setvbuf 버퍼 가득 찰 때만 write). 대량 주입 전용 | 1.4s → **0.058s** |
+| 베어메탈 Linux (ext4) | ~2–10 μs | ~10 초 |
+| Apple Silicon / macOS APFS 네이티브 | ~5–20 μs | ~30 초 |
+| **WSL 2 + Docker + 9p/dirsync (우리 환경)** | **~300 μs** | **~8–9 시간** |
 
-**정리:** 병목은 9p 파일시스템의 **stat/fopen 당 ~0.3ms 블로킹**. 행당 5~6회 호출하던 것을 테이블당 1회로 줄이고, write 는 대용량 버퍼에 누적해 2회→1회로 압축.
+Local macOS / 베어메탈 Ubuntu 에서는 이슈가 거의 안 보이는데, devcontainer 안에서는
+**row 당 32 ms** 로 100× 이상 느려지는 이유가 이것. "내 맥에선 잘 되는데요?" 현상의
+원인을 FS 레이어로 추적해서 확인했다.
+
+> 발표 요지: *데이터베이스 성능은 "알고리즘 O(log n)" 만이 아니라 **아래 레이어의
+> syscall latency** 를 동시에 고려해야 한다. 동일 코드가 환경에 따라 100× 차이가 난다.*
+
+### 초기 증상
+100만 건 inject 가 60초 타임아웃 안에 **2,716 건**만 들어가던 상황 (32 ms / 건).
+아래 5 단계로 devcontainer 환경에서 **10,000× 가속**. 베어메탈에서도 같은 코드가
+2–5× 빨라지는 부수 효과.
+
+### 최적화 단계
+
+| 단계 | 조치 | 효과 (10k INSERT, devcontainer) |
+|---|---|---|
+| 원인 파악 | `time` 으로 `user+sys 0.7s` vs `real 14.8s` 확인 → 93% I/O wait. `df -T` 로 9p + `dirsync` 확인 | 원인 확정 |
+| ① append FILE\* 캐시 | `fopen/fclose` per row → 프로세스 생애동안 hold-open + `setvbuf` 64 KB. dirsync 비용을 `atexit` 1 회로 압축 | 14.8 s → 13.5 s |
+| ② schema 캐시 | `load_schema` (fopen + parse) 가 매 INSERT 호출 → 테이블당 1 회만 로드 후 `memcpy` clone | 13.5 s → 4.8 s |
+| ③ path resolution 캐시 | `build_schema_path` / `build_table_path` 의 legacy/nested fallback 최대 **5 stat** → 첫 호출만 | 4.8 s → 1.4 s |
+| ④ user-id 경로 meta cache 통합 | 사용자가 `id` 명시한 INSERT 는 meta cache 미초기화 → `count_csv_rows` 매 호출 O(N²). 경로 무관 통합 | O(N²) 제거 |
+| ⑤ `BULK_INSERT_MODE=1` | per-insert `fflush` 생략 (setvbuf 버퍼 가득 찰 때만 write). 대량 주입 전용 | 1.4 s → **0.058 s** |
+
+**정리:** 병목은 9p + dirsync 의 **stat / fopen 당 ~0.3 ms 블로킹**. 행당 5~6 회
+호출하던 것을 테이블당 1 회로 줄이고, write 는 64 KB 버퍼에 누적해 write 수를 수천 배 압축.
 
 ### `storage_insert` 당 I/O 감소 상세
 ```
-Before                              After
-─────────────────────────           ─────────────────────────
-load_schema fopen      1 stat       → 캐시 히트, 0 stat
-                       1 read       → 0 read
-build_schema_path      1~2 stat     → 캐시 히트, 0 stat
-build_table_path       1~3 stat     → 캐시 히트, 0 stat
-stat (cache validate)  1 stat       → append fp 살면 생략
-append_csv_row fopen   1 stat+open  → 프로세스 생애 1회
-write                  1 write      → 버퍼 64KB 차면 write
-fclose                 1 sync       → atexit 1회만
-─────────────────────────           ─────────────────────────
-Total: ~6 stat + 4 write/sync       Total: ~0 stat + 1/64KB write
+Before (devcontainer 32 ms)           After (devcontainer 3 µs)
+─────────────────────────             ─────────────────────────
+load_schema fopen      1 stat         → 캐시 히트, 0 stat
+                       1 read         → 0 read
+build_schema_path      1~2 stat       → 캐시 히트, 0 stat
+build_table_path       1~3 stat       → 캐시 히트, 0 stat
+stat (cache validate)  1 stat         → append fp 살면 생략
+append_csv_row fopen   1 stat+open    → 프로세스 생애 1 회
+write                  1 write        → 버퍼 64 KB 차면 write
+fclose                 1 sync         → atexit 1 회만
+─────────────────────────             ─────────────────────────
+~6 stat + 4 write/sync                ~0 stat + 1/(64KB) write
 
-9p 라운드트립 0.3ms × 6 ≈ 1.8ms              ≈ 0
+9p 라운드트립 0.3 ms × 6 ≈ 1.8 ms     ≈ 0
+추가 write/sync ~0.4 ms × 4 ≈ 1.6 ms  ≈ 0 (atexit 1 회로 이월)
 ```
 
-### 1M 건 최종 결과
+### 1M 건 최종 결과 (devcontainer 기준)
 | 모드 | 1M INSERT |
 |---|---|
-| 수정 전 | ~25분 (추정, timeout 자주) |
-| 기본 (safe fflush) | **~138s** |
-| `BULK_INSERT_MODE=1` | **2.8s** (357k ops/s) |
-| Python 직접 CSV + BIN 작성 (sqlparser 우회) | **2.6s** |
+| 수정 전 | ~8 시간 (추정, 대부분 timeout 으로 미완료) |
+| 기본 (safe fflush, reader 가시성 보장) | **~138 s** |
+| `BULK_INSERT_MODE=1` | **2.8 s** (357k ops/s) |
+| Python 직접 CSV + BIN 작성 (sqlparser 우회) | **2.6 s** |
+
+### 교훈
+- **"내 로컬에선 빠른데요?"** 가 가장 위험한 말. 같은 알고리즘이 FS 레이어 때문에 100×
+  차이 날 수 있다. 팀 공통 환경 (devcontainer) 기준으로 측정해야 한다.
+- **syscall 예산을 선언적으로 관리**: "이 함수가 INSERT 하나에 5 stat 을 호출함" 같은
+  수치를 알아야 의미 있는 최적화가 된다.
+- 최적화 기법(append FP / schema / path / meta 캐시, BULK 모드)은 **devcontainer
+  외 환경에서도 그냥 빨라지므로** 되돌릴 이유가 없다. "환경 핫픽스" 가 "범용 개선"
+  으로 승격된 사례.
 
 ---
 
