@@ -306,9 +306,9 @@ body {
 
 /* ═══════ TABLE ═══════════════════════════════════════════════ */
 .result-header {
-  font-size: 14px; font-weight: 500; color: var(--grey-60);
+  font-size: 14px; font-weight: 500; color: var(--black);
   margin: 24px 0 12px;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
 }
 .table-wrap {
   border: 1px solid var(--grey-10);
@@ -348,17 +348,17 @@ table {
   background: #b8001a;
   color: var(--white) !important;
 }
-/* TIMEOUT: 옅은 회색 + 검은 글씨 + bold — FAIL 과 구분되면서 가독성 유지 */
+/* TIMEOUT: 짙은 회색 + 흰 글씨 + bold — FAIL 빨강과 구분되면서 선명 */
 .table-wrap tbody tr.row-timeout td,
 .table-wrap-dark tbody tr.row-timeout td {
-  background: var(--grey-10);
-  color: var(--black) !important;
+  background: var(--grey-80);
+  color: var(--white) !important;
   font-weight: 600;
 }
 .table-wrap tbody tr.row-timeout:hover td,
 .table-wrap-dark tbody tr.row-timeout:hover td {
-  background: var(--grey-20);
-  color: var(--black) !important;
+  background: #2f3034;
+  color: var(--white) !important;
 }
 
 /* dark variant */
@@ -452,7 +452,6 @@ table {
 }
 
 /* 작은 글씨들 가독성 보정 */
-.result-header { font-size: 14px; color: var(--grey-20); }
 .big-label { font-size: 15px; color: var(--grey-10); }
 .badge-fast, .badge-ok { font-size: 13px; }
 
